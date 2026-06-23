@@ -1,61 +1,103 @@
-# VoidRP Launcher
+# 🚀 VoidRP Launcher
 
-Десктопный лаунчер для VoidRP — устанавливает и запускает Minecraft с нужным модпаком, авторизует игрока через backend.
+> Десктопный лаунчер VoidRP — устанавливает модпак, авторизует игрока и запускает Minecraft.
 
-## Стек
+![Electron](https://img.shields.io/badge/Electron-latest-47848F?logo=electron&logoColor=white)
+![Vue](https://img.shields.io/badge/Vue-3+TS-42b883?logo=vuedotjs&logoColor=white)
+![.NET](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)
+![License](https://img.shields.io/badge/license-proprietary-red)
 
-- **Electron** (main process) · TypeScript
-- **Vue 3 + TypeScript + Pinia + Tailwind CSS v4** (renderer)
-- **.NET 8** минимальный ASP.NET API — CoreHost sidecar (порт 38765)
-- **CmlLib** — установка и управление файлами Minecraft
-- **electron-updater** — самообновление
+---
 
-## Архитектура (три процесса)
+## 🗺️ Место в экосистеме
 
 ```
-Renderer (Vue 3)
-    ↕ window.desktopBridge.request() (IPC)
-Electron main (electron/main.ts)
-    ↕ HTTP localhost:38765
-CoreHost (.NET 8, VoidRpLauncher.CoreHost)
-    ↕ HTTPS
-Backend API (void-rp.ru)
+  Игрок запускает лаунчер
+        │
+┌───────────────────────────────────┐
+│  voidrp-launcher-vue              │
+│  Renderer (Vue 3) ←IPC→ Electron  │
+│       └── HTTP:38765 → CoreHost   │
+└───────────┬───────────────────────┘
+            │ play-ticket auth (HTTPS)
+            ▼
+  minecraft-backend → Minecraft Server
 ```
 
-- **Renderer** — интерфейс лаунчера, Pinia store (`src/stores/launcher.ts`)
-- **Electron main** — создаёт BrowserWindow, запускает CoreHost как дочерний процесс, проксирует IPC → HTTP
-- **CoreHost** — вся тяжёлая логика: скачивание файлов Minecraft (CmlLib), play-ticket flow, управление сессией
+---
 
-## Быстрый старт (Linux)
+## ✨ Возможности
+
+- **Авторизация** — вход через аккаунт VoidRP, хранение сессии
+- **Play-ticket flow** — безопасное получение тикета для входа на сервер без передачи пароля в игру
+- **Синхронизация модпака** — скачивание, обновление, проверка файлов через CmlLib
+- **Запуск Minecraft** — bootstrap JVM с нужными параметрами памяти и аргументами
+- **Самообновление** — electron-updater + отдельный VoidRpLauncher.Updater (C#)
+- **Настройки** — выбор JVM, объём RAM, игровой директории
+
+---
+
+## 🏗️ Три процесса
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Renderer  (Vue 3 + TypeScript + Pinia + Tailwind v4)     │
+│    src/stores/launcher.ts — состояние лаунчера              │
+│    window.desktopBridge.request() → IPC                     │
+├─────────────────────────────────────────────────────────────┤
+│ 2. Electron main  (electron/main.ts)                        │
+│    BrowserWindow · запуск CoreHost · IPC ↔ HTTP proxy       │
+├─────────────────────────────────────────────────────────────┤
+│ 3. CoreHost  (.NET 8, ASP.NET minimal API, порт 38765)      │
+│    LauncherFacadeService · AuthenticatedLaunchService       │
+│    RuntimeBootstrapService · CmlLib (файлы Minecraft)       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📋 Требования
+
+| Компонент | Версия |
+|---|---|
+| Node.js | 18+ |
+| .NET SDK | 8.0+ |
+| npm | 9+ |
+
+---
+
+## 🚀 Быстрый старт (разработка)
 
 ```bash
 cd voidrp_launcher_vue
 npm install
 
-# Сборка CoreHost (.NET 8 должен быть установлен)
-npm run build:core:dev:linux
-
-# Запуск в dev режиме
+# Собрать CoreHost (.NET) и запустить всё
 npm run dev
 ```
 
-## Основные команды
+### Отдельные команды
 
 ```bash
-npm run dev                    # dev режим (renderer :5177 + Electron)
-npm run build:core:dev:linux   # сборка CoreHost для Linux (dev конфиг)
-npm run build:electron         # сборка main process
-npm run build:linux            # полная сборка AppImage / deb
+npm run build:core:dev:linux   # только CoreHost (Linux)
+npm run build:electron         # только Electron main process
+npm run build:linux            # продакшн-сборка AppImage/deb
 ```
 
-## Auth flow (play-ticket)
+---
 
-1. Игрок вводит логин/пароль → CoreHost аутентифицирует через `/api/v1/auth/login`
-2. CoreHost запрашивает play-ticket у backend: `POST /api/v1/auth/play-ticket`
-3. Minecraft запускается с аргументами сессии, play-ticket передаётся в JVM args
-4. Auth Bridge мод на сервере проверяет тикет через backend при входе игрока
+## 🔗 Связанные репозитории
 
-## Самообновление
+| Репо | Связь |
+|---|---|
+| [minecraft-backend](https://github.com/VOIDRP-MINECRAFT/minecraft-backend) | Auth API, play-ticket endpoint |
+| [voidrp-launcher-java](https://github.com/VOIDRP-MINECRAFT/voidrp-launcher-java) | Альтернативный лаунчер (JavaFX) |
+| [voidrp-site](https://github.com/VOIDRP-MINECRAFT/voidrp-site) | Сайт — открывается из лаунчера |
 
-Манифест: `https://void-rp.ru/launcher/self-update/manifest.json`
-Обновление применяется через отдельный `VoidRpLauncher.Updater` (C# консольное приложение).
+---
+
+<div align="center">
+<a href="https://void-rp.ru">🌐 Сайт</a> ·
+<a href="https://github.com/VOIDRP-MINECRAFT">🏠 Организация</a>
+</div>
