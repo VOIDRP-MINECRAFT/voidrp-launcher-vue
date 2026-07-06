@@ -32,7 +32,16 @@ function onAvatarError() {
   }
 }
 
-const navGroups = [
+const activeServer = computed(() =>
+  launcher.serverList.find((s) => s.slug === launcher.selectedSlug) ?? null,
+)
+// A feature is enabled unless the active server explicitly disables it.
+function feat(key: string) {
+  const f = activeServer.value?.features
+  return !f || f[key] !== false
+}
+
+const rawNavGroups = [
   {
     label: 'Игра',
     items: [
@@ -62,15 +71,15 @@ const navGroups = [
     label: 'Сервер',
     items: [
       {
-        title: 'Государство', to: '/nation',
+        title: 'Государство', to: '/nation', feature: 'nations',
         icon: 'M3 3v1.5M3 21v-6m0 0 2.77-.693a9 9 0 0 1 6.208.682l.108.054a9 9 0 0 0 6.086.71l3.114-.732a48.524 48.524 0 0 1-.005-10.499l-3.11.732a9 9 0 0 1-6.085-.711l-.108-.054a9 9 0 0 0-6.208-.682L3 4.5M3 15V4.5',
       },
       {
-        title: 'Рейтинг', to: '/leaderboard',
+        title: 'Рейтинг', to: '/leaderboard', feature: 'leaderboards',
         icon: 'M16.5 18.75h-9m9 0a3 3 0 0 1 3 3h-15a3 3 0 0 1 3-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 0 1-.982-3.172M9.497 14.25a7.454 7.454 0 0 0 .981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 0 0 7.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M7.73 9.728a6.726 6.726 0 0 0 2.748 1.35m8.272-6.842V4.5c0 2.108-.966 3.99-2.48 5.228m2.48-5.492a46.32 46.32 0 0 1 2.916.52 6.003 6.003 0 0 1-5.395 4.972m0 0a6.726 6.726 0 0 1-2.749 1.35m0 0a6.772 6.772 0 0 1-3.044 0',
       },
       {
-        title: 'Карта', to: '/map',
+        title: 'Карта', to: '/map', feature: 'map',
         icon: 'M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z',
       },
 
@@ -94,6 +103,16 @@ const navGroups = [
     ],
   },
 ]
+
+// Hide tabs whose feature the active server disables; drop empty groups.
+const navGroups = computed(() =>
+  rawNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((it) => !('feature' in it) || feat((it as { feature: string }).feature)),
+    }))
+    .filter((group) => group.items.length > 0),
+)
 
 const currentTierLabel = ref<string | null>(null)
 

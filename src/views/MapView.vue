@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { SITE_BASE } from '../stores/launcher'
+import { computed, ref } from 'vue'
+import { SITE_BASE, useLauncherStore } from '../stores/launcher'
 
+const launcher = useLauncherStore()
 const loaded = ref(false)
 const failed = ref(false)
 
-const MAP_URL = `${SITE_BASE}/map/`
+// Use the selected server's own map URL, falling back to the site map.
+const MAP_URL = computed(() => {
+  const active = launcher.serverList.find((s) => s.slug === launcher.selectedSlug)
+  return active?.mapUrl || `${SITE_BASE}/map/`
+})
 
 function onLoad() { loaded.value = true }
 function onLoadFail(_e: unknown, _code: number, _desc: string, _url: string, isMainFrame: boolean) {
@@ -13,7 +18,7 @@ function onLoadFail(_e: unknown, _code: number, _desc: string, _url: string, isM
 }
 
 function openInBrowser() {
-  window.desktopAPI?.openExternal?.(MAP_URL)
+  window.desktopAPI?.openExternal?.(MAP_URL.value)
 }
 </script>
 

@@ -121,19 +121,21 @@ public sealed class LauncherAccountApiClient
         return await ReadJsonAsync<LauncherPreferencesDto>(response, cancellationToken);
     }
 
-    public async Task<SimpleResponseDto> PostModSuggestionAsync(string accessToken, string url, string? comment, CancellationToken cancellationToken = default)
+    public async Task<SimpleResponseDto> PostModSuggestionAsync(string accessToken, string url, string? comment, string? serverSlug = null, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "mod-suggestions/");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        if (!string.IsNullOrWhiteSpace(serverSlug)) request.Headers.Add("X-Server-Slug", serverSlug);
         request.Content = JsonContent.Create(new { url, comment }, options: JsonOptions);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         return await ReadJsonAsync<SimpleResponseDto>(response, cancellationToken);
     }
 
-    public async Task<SimpleResponseDto> PostPlayerFeedbackAsync(string accessToken, string type, string title, string? body, CancellationToken cancellationToken = default)
+    public async Task<SimpleResponseDto> PostPlayerFeedbackAsync(string accessToken, string type, string title, string? body, string? serverSlug = null, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "player-feedback/");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        if (!string.IsNullOrWhiteSpace(serverSlug)) request.Headers.Add("X-Server-Slug", serverSlug);
         request.Content = JsonContent.Create(new { type, title, body }, options: JsonOptions);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         return await ReadJsonAsync<SimpleResponseDto>(response, cancellationToken);
@@ -341,14 +343,16 @@ public sealed class LauncherAuthSessionService
     private readonly LauncherAccountApiClient _apiClient;
     private readonly LauncherTokenStore _tokenStore;
     private readonly DiagnosticsService _diagnostics;
+    private readonly ServerCatalogService _serverCatalog;
     private readonly string _deviceName;
     private LauncherAuthSnapshot? _snapshot;
 
-    public LauncherAuthSessionService(LauncherAccountApiClient apiClient, LauncherTokenStore tokenStore, DiagnosticsService diagnostics, string deviceName = "VoidRP Launcher")
+    public LauncherAuthSessionService(LauncherAccountApiClient apiClient, LauncherTokenStore tokenStore, DiagnosticsService diagnostics, ServerCatalogService serverCatalog, string deviceName = "VoidRP Launcher")
     {
         _apiClient = apiClient;
         _tokenStore = tokenStore;
         _diagnostics = diagnostics;
+        _serverCatalog = serverCatalog;
         _deviceName = deviceName;
     }
 
@@ -448,13 +452,13 @@ public sealed class LauncherAuthSessionService
     public async Task<SimpleResponseDto> SuggestModAsync(string url, string? comment, CancellationToken cancellationToken = default)
     {
         if (_snapshot is null || string.IsNullOrWhiteSpace(_snapshot.AccessToken)) throw new InvalidOperationException("Launcher user is not authenticated");
-        return await _apiClient.PostModSuggestionAsync(_snapshot.AccessToken, url, comment, cancellationToken);
+        return await _apiClient.PostModSuggestionAsync(_snapshot.AccessToken, url, comment, _serverCatalog.GetSelectedSlug(), cancellationToken);
     }
 
     public async Task<SimpleResponseDto> SubmitFeedbackAsync(string type, string title, string? body, CancellationToken cancellationToken = default)
     {
         if (_snapshot is null || string.IsNullOrWhiteSpace(_snapshot.AccessToken)) throw new InvalidOperationException("Launcher user is not authenticated");
-        return await _apiClient.PostPlayerFeedbackAsync(_snapshot.AccessToken, type, title, body, cancellationToken);
+        return await _apiClient.PostPlayerFeedbackAsync(_snapshot.AccessToken, type, title, body, _serverCatalog.GetSelectedSlug(), cancellationToken);
     }
 
     public async Task LogoutAsync(CancellationToken cancellationToken = default)

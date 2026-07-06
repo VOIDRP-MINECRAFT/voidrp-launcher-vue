@@ -301,6 +301,8 @@ export interface GameServer {
   whitelistMode: string
   maintenance: boolean
   isDefault: boolean
+  mapUrl?: string | null
+  features?: Record<string, boolean> | null
   status?: { online: boolean; playersOnline: number; playersMax: number; version?: string | null } | null
 }
 
