@@ -15,6 +15,16 @@ const bgStyle = computed(() => {
 })
 
 const online = computed(() => activeServer.value?.status?.online ?? null)
+const maintenance = computed(() => activeServer.value?.maintenance ?? false)
+// Block launch when the server is explicitly offline or under maintenance.
+// (online === null means status unknown/loading — still allow.)
+const canPlay = computed(() => !launcher.isBusy && online.value !== false && !maintenance.value)
+const playLabel = computed(() => {
+  if (launcher.isBusy) return 'Подготовка...'
+  if (maintenance.value) return 'Тех. работы'
+  if (online.value === false) return 'Сервер офлайн'
+  return 'Играть'
+})
 
 function selectServer(slug: string) {
   if (slug !== launcher.selectedSlug) launcher.selectServer(slug)
@@ -123,18 +133,21 @@ function selectServer(slug: string) {
       <!-- Actions -->
       <div class="mt-6 flex flex-wrap items-center gap-2.5">
         <button
-          class="flex items-center gap-2.5 rounded-[16px] bg-gradient-to-r from-violet-500 to-indigo-500 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-violet-500/30 transition hover:brightness-110 hover:shadow-violet-500/50 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="launcher.isBusy"
+          class="flex items-center gap-2.5 rounded-[16px] bg-gradient-to-r from-violet-500 to-indigo-500 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-violet-500/30 transition hover:brightness-110 hover:shadow-violet-500/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:brightness-100"
+          :disabled="!canPlay"
           @click="launcher.play()"
         >
-          <svg v-if="!launcher.isBusy" class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M6.3 2.841A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.269l9.344-5.89a1.5 1.5 0 0 0 0-2.538L6.3 2.84z"/>
-          </svg>
-          <svg v-else class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <svg v-if="launcher.isBusy" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/>
           </svg>
-          {{ launcher.isBusy ? 'Подготовка...' : 'Играть' }}
+          <svg v-else-if="online === false || maintenance" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="9"/><line x1="8" y1="12" x2="16" y2="12"/>
+          </svg>
+          <svg v-else class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M6.3 2.841A1.5 1.5 0 0 0 4 4.11v11.78a1.5 1.5 0 0 0 2.3 1.269l9.344-5.89a1.5 1.5 0 0 0 0-2.538L6.3 2.84z"/>
+          </svg>
+          {{ playLabel }}
         </button>
 
         <button
