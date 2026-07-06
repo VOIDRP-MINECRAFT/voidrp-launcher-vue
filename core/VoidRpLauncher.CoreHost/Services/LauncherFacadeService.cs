@@ -162,6 +162,27 @@ public sealed class LauncherFacadeService
             }
         });
 
+    /// Re-fetches the launcher dashboard (scoped to the currently selected server)
+    /// and returns fresh state — used after the player switches servers.
+    public async Task<OperationResponseDto> RefreshDashboardAsync(CancellationToken cancellationToken = default)
+        => await RunExclusiveAsync(async () =>
+        {
+            try
+            {
+                if (_authSessionService.Snapshot?.IsAuthenticated == true)
+                {
+                    var dashboard = await TryLoadDashboardAsync(cancellationToken);
+                    _stateService.ApplyDashboard(dashboard);
+                }
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.Warn("Dashboard", $"Refresh after server switch failed: {ex.Message}");
+            }
+
+            return OperationResponseDto.Success(GetState());
+        });
+
     public async Task<OperationResponseDto> LogoutAsync(CancellationToken cancellationToken = default)
         => await RunExclusiveAsync(async () =>
         {

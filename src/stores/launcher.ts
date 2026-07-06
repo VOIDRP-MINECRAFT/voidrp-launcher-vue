@@ -374,9 +374,16 @@ export const useLauncherStore = defineStore('launcher', () => {
     skin.updatedAt = value.updatedAt ? String(value.updatedAt) : null
   }
 
+  // Direct-to-backend fetch that scopes to the selected server via X-Server-Slug.
+  function backendFetch(path: string, init: RequestInit = {}) {
+    const headers: Record<string, string> = { ...(init.headers as Record<string, string> || {}) }
+    if (selectedSlug.value) headers['X-Server-Slug'] = selectedSlug.value
+    return fetch(`${BACKEND_BASE}${path}`, { cache: 'no-store', ...init, headers })
+  }
+
   async function fetchBattlePass(nickname: string) {
     try {
-      const resp = await fetch(`${BACKEND_BASE}/battlepass/profile-by-nick/${encodeURIComponent(nickname)}`, { cache: 'no-store' })
+      const resp = await backendFetch(`/battlepass/profile-by-nick/${encodeURIComponent(nickname)}`)
       if (resp.ok) {
         bpProfile.value = await resp.json() as BattlePassProfile
       } else {
@@ -453,7 +460,7 @@ export const useLauncherStore = defineStore('launcher', () => {
 
   async function fetchServerStatus() {
     try {
-      const res = await fetch(`${BACKEND_BASE}/server/status`)
+      const res = await backendFetch('/server/status')
       if (!res.ok) throw new Error()
       const data = await res.json()
       serverStatus.value = {
@@ -485,15 +492,20 @@ export const useLauncherStore = defineStore('launcher', () => {
 
   async function selectServer(slug: string) {
     try {
-      const data = await readJson<{ selectedSlug: string | null }>('/api/servers/select', {
+      const data = await readJson<{ selectedSlug: string | null; state?: LauncherState }>('/api/servers/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug }),
       })
       selectedSlug.value = data.selectedSlug ?? slug
+      // CoreHost returns dashboard re-scoped to the new server.
+      if (data.state) applyState(data.state)
     } catch {
       selectedSlug.value = slug
     }
+    // Refresh view-local data (battle pass) for the new server.
+    const nick = state.dashboard?.playerStats?.minecraftNickname
+    if (nick) void fetchBattlePass(nick)
     return selectedSlug.value
   }
 
@@ -804,5 +816,6 @@ export const useLauncherStore = defineStore('launcher', () => {
     selectedSlug,
     fetchServers,
     selectServer,
+    backendFetch,
   }
 })

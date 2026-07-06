@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { useLauncherStore, BACKEND_BASE } from '../stores/launcher'
+import { useLauncherStore } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 const route = useRoute()
@@ -118,10 +118,7 @@ const currentTierLabel = ref<string | null>(null)
 
 async function fetchTier(nick: string) {
   try {
-    const resp = await fetch(
-      `${BACKEND_BASE}/progression/player/${encodeURIComponent(nick)}`,
-      { cache: 'no-store' }
-    )
+    const resp = await launcher.backendFetch(`/progression/player/${encodeURIComponent(nick)}`)
     if (resp.ok) {
       const data = await resp.json()
       currentTierLabel.value = data.current_tier_label ?? null
@@ -129,9 +126,10 @@ async function fetchTier(nick: string) {
   } catch { }
 }
 
+// Refetch the tier badge on nickname change AND on server switch (per-server progression).
 watch(
-  () => launcher.playerStats.minecraftNickname,
-  (nick) => { if (nick) fetchTier(nick) },
+  () => [launcher.playerStats.minecraftNickname, launcher.selectedSlug] as const,
+  ([nick]) => { if (nick) fetchTier(nick) },
   { immediate: true }
 )
 </script>

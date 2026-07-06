@@ -151,6 +151,29 @@ public sealed class ServerCatalogService
     }
 }
 
+/// <summary>
+/// Stamps every outgoing backend request with the currently-selected server's
+/// slug (X-Server-Slug) so game data (dashboard, nations, leaderboards, ...) is
+/// scoped to it. Global endpoints ignore the header, so it is safe everywhere.
+/// </summary>
+public sealed class ServerSlugHandler : DelegatingHandler
+{
+    private readonly Func<string?> _slugProvider;
+
+    public ServerSlugHandler(Func<string?> slugProvider) => _slugProvider = slugProvider;
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var slug = _slugProvider();
+        if (!string.IsNullOrWhiteSpace(slug) && !request.Headers.Contains("X-Server-Slug"))
+        {
+            request.Headers.Add("X-Server-Slug", slug);
+        }
+
+        return base.SendAsync(request, cancellationToken);
+    }
+}
+
 public sealed class GameServerDto
 {
     public string Slug { get; set; } = string.Empty;

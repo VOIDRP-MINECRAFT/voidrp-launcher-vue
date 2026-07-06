@@ -52,7 +52,10 @@ builder.Services.AddSingleton<ServerCatalogService>();
 builder.Services.AddSingleton(sp =>
 {
     var opts = sp.GetRequiredService<AppEndpointsOptions>();
-    return new LauncherAccountApiClient(new HttpClient(), opts.AccountApiBaseUrl);
+    var catalog = sp.GetRequiredService<ServerCatalogService>();
+    // Scope every backend call to the selected server via X-Server-Slug.
+    var handler = new ServerSlugHandler(() => catalog.GetSelectedSlug()) { InnerHandler = new HttpClientHandler() };
+    return new LauncherAccountApiClient(new HttpClient(handler), opts.AccountApiBaseUrl);
 });
 
 builder.Services.AddSingleton(sp => new LauncherTokenStore(sp.GetRequiredService<LauncherPathsService>().StateDirectory));
@@ -99,7 +102,7 @@ app.MapGet("/api/servers", async (ServerCatalogService catalog) =>
     return Results.Ok(new { servers, selectedSlug = catalog.GetSelectedSlug() });
 });
 
-app.MapPost("/api/servers/select", (ServerSelectDto dto, ServerCatalogService catalog) =>
+app.MapPost("/api/servers/select", async (ServerSelectDto dto, ServerCatalogService catalog, LauncherFacadeService facade) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Slug))
     {
@@ -107,7 +110,9 @@ app.MapPost("/api/servers/select", (ServerSelectDto dto, ServerCatalogService ca
     }
 
     catalog.SelectServer(dto.Slug);
-    return Results.Ok(new { selectedSlug = catalog.GetSelectedSlug() });
+    // Reload the dashboard scoped to the new server and hand back fresh state.
+    var refreshed = await facade.RefreshDashboardAsync(CancellationToken.None);
+    return Results.Ok(new { selectedSlug = catalog.GetSelectedSlug(), state = refreshed.State });
 });
 
 app.MapPost("/api/actions/repair", async (LauncherFacadeService facade) =>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useLauncherStore, BACKEND_BASE, SITE_BASE } from '../stores/launcher'
 
 const launcher = useLauncherStore()
@@ -133,7 +133,7 @@ const activeNationMetricDef = computed(() =>
 async function loadLeaderboard() {
   loadingLeaderboard.value = true
   try {
-    const resp = await fetch(`${PUBLIC_API}/progression/leaderboard`, { cache: 'no-store' })
+    const resp = await launcher.backendFetch(`/progression/leaderboard`)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data: FullLeaderboard = await resp.json()
     leaderboard.value = data
@@ -147,7 +147,7 @@ async function loadMyProgression() {
   if (!nick) { loadingMine.value = false; return }
   loadingMine.value = true
   try {
-    const resp = await fetch(`${PUBLIC_API}/progression/player/${encodeURIComponent(nick)}`, { cache: 'no-store' })
+    const resp = await launcher.backendFetch(`/progression/player/${encodeURIComponent(nick)}`)
     if (resp.status === 404) { myProgression.value = null; return }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     myProgression.value = await resp.json()
@@ -159,7 +159,7 @@ async function loadPlayers() {
   if (playersData.value) return
   loadingPlayers.value = true
   try {
-    const resp = await fetch(`${PUBLIC_API}/players/top`, { cache: 'no-store' })
+    const resp = await launcher.backendFetch(`/players/top`)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data: PlayerTopResponse = await resp.json()
     playersData.value = data
@@ -172,7 +172,7 @@ async function loadNations() {
   if (nationsData.value) return
   loadingNations.value = true
   try {
-    const resp = await fetch(`${PUBLIC_API}/nation-stats/rankings`, { cache: 'no-store' })
+    const resp = await launcher.backendFetch(`/nation-stats/rankings`)
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     nationsData.value = await resp.json()
   } catch { nationsError.value = 'Не удалось загрузить рейтинг государств.' }
@@ -224,6 +224,20 @@ function rankLabel(rank: number) {
 onMounted(() => {
   loadLeaderboard()
   loadMyProgression()
+})
+
+// Re-scope all data when the player switches servers.
+watch(() => launcher.selectedSlug, () => {
+  leaderboard.value = null
+  myProgression.value = null
+  playersData.value = null
+  nationsData.value = null
+  activeTier.value = ''
+  activePlayerCat.value = ''
+  loadLeaderboard()
+  loadMyProgression()
+  if (mainTab.value === 'players') loadPlayers()
+  if (mainTab.value === 'nations') loadNations()
 })
 </script>
 
