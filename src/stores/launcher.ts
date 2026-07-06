@@ -287,6 +287,23 @@ interface ServerStatus {
   version: string
 }
 
+export interface GameServer {
+  slug: string
+  name: string
+  description?: string | null
+  iconUrl?: string | null
+  bannerUrl?: string | null
+  host: string
+  port: number
+  mcVersion: string
+  loader: string
+  maxPlayers: number
+  whitelistMode: string
+  maintenance: boolean
+  isDefault: boolean
+  status?: { online: boolean; playersOnline: number; playersMax: number; version?: string | null } | null
+}
+
 export const useLauncherStore = defineStore('launcher', () => {
   const state = reactive<LauncherState>(defaultState())
   const skin = reactive<SkinState>(defaultSkin())
@@ -295,6 +312,8 @@ export const useLauncherStore = defineStore('launcher', () => {
   const bpProfile = ref<BattlePassProfile | null>(null)
   const initProgress = ref(0)
   const serverStatus = ref<ServerStatus | null>(null)
+  const serverList = ref<GameServer[]>([])
+  const selectedSlug = ref<string | null>(null)
   let pollHandle: number | null = null
   let bootstrapPromise: Promise<void> | null = null
   let serverStatusTimer: ReturnType<typeof setInterval> | null = null
@@ -444,6 +463,36 @@ export const useLauncherStore = defineStore('launcher', () => {
     } catch {
       serverStatus.value = { online: false, playersOnline: 0, playersMax: 0, version: '' }
     }
+  }
+
+  async function fetchServers() {
+    try {
+      const data = await readJson<{ servers: GameServer[]; selectedSlug: string | null }>('/api/servers')
+      serverList.value = Array.isArray(data.servers) ? data.servers : []
+      selectedSlug.value = data.selectedSlug ?? selectedSlug.value
+      // Default the selection to the default/first server when none is chosen.
+      if (!selectedSlug.value && serverList.value.length > 0) {
+        const def = serverList.value.find((s) => s.isDefault) ?? serverList.value[0]
+        selectedSlug.value = def.slug
+      }
+    } catch {
+      // CoreHost or backend unavailable — keep whatever we had.
+    }
+    return serverList.value
+  }
+
+  async function selectServer(slug: string) {
+    try {
+      const data = await readJson<{ selectedSlug: string | null }>('/api/servers/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug }),
+      })
+      selectedSlug.value = data.selectedSlug ?? slug
+    } catch {
+      selectedSlug.value = slug
+    }
+    return selectedSlug.value
   }
 
   function startServerStatusPolling() {
@@ -749,5 +798,9 @@ export const useLauncherStore = defineStore('launcher', () => {
     serverStatus,
     fetchServerStatus,
     fetchBattlePass,
+    serverList,
+    selectedSlug,
+    fetchServers,
+    selectServer,
   }
 })
