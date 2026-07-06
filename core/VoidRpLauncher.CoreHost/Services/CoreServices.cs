@@ -991,11 +991,13 @@ public sealed class LocalMinecraftLaunchService
 {
     private readonly LauncherPathsService _pathsService;
     private readonly DiagnosticsService _diagnostics;
+    private readonly ServerCatalogService _serverCatalog;
 
-    public LocalMinecraftLaunchService(LauncherPathsService pathsService, DiagnosticsService diagnostics)
+    public LocalMinecraftLaunchService(LauncherPathsService pathsService, DiagnosticsService diagnostics, ServerCatalogService serverCatalog)
     {
         _pathsService = pathsService;
         _diagnostics = diagnostics;
+        _serverCatalog = serverCatalog;
     }
 
     public async Task<Process> LaunchAsync(string nickname, LauncherManifest manifest, int maximumRamMb)
@@ -1041,6 +1043,16 @@ public sealed class LocalMinecraftLaunchService
             MaximumRamMb = maximumRamMb,
             JavaPath = javaPath
         };
+
+        // Auto-connect to the selected server so the client joins it on launch.
+        await _serverCatalog.EnsureLoadedAsync();
+        var selected = _serverCatalog.GetSelectedServer();
+        if (selected is not null && !string.IsNullOrWhiteSpace(selected.Host))
+        {
+            launchOption.ServerIp = selected.Host;
+            launchOption.ServerPort = selected.Port > 0 ? selected.Port : 25565;
+            _diagnostics.Info("Launch", $"Quick-connect to {selected.Host}:{launchOption.ServerPort} ({selected.Slug}).");
+        }
 
         // GetVersionAsync reads from the local version JSON (which we keep in sync via pack manifest).
         // BuildProcess skips the Install step entirely — no Mojang network calls, no file downloads.

@@ -88,6 +88,15 @@ public sealed class ServerCatalogService
         return _cache;
     }
 
+    /// <summary>Loads the catalogue once if it hasn't been fetched yet (best-effort).</summary>
+    public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cache.Count == 0)
+        {
+            await GetServersAsync(cancellationToken);
+        }
+    }
+
     public string? GetSelectedSlug()
     {
         EnsureSelectionLoaded();
