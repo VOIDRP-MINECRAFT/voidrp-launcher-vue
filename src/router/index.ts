@@ -3,6 +3,7 @@ import LoginView from '../views/LoginView.vue'
 import ServerSelectView from '../views/ServerSelectView.vue'
 import AppLayout from '../views/AppLayout.vue'
 import HomeView from '../views/HomeView.vue'
+import OverviewView from '../views/OverviewView.vue'
 import NationView from '../views/NationView.vue'
 import AccountView from '../views/AccountView.vue'
 import SettingsView from '../views/SettingsView.vue'
@@ -27,6 +28,7 @@ const routes = [
     children: [
       { path: '', redirect: '/home' },
       { path: 'home', component: HomeView },
+      { path: 'overview', component: OverviewView },
       { path: 'nation', component: NationView },
       { path: 'account', component: AccountView },
       { path: 'settings', component: SettingsView },
