@@ -19,11 +19,19 @@ if (string.IsNullOrWhiteSpace(endpoints.AccountApiBaseUrl))
 {
     endpoints.AccountApiBaseUrl = "https://api.void-rp.ru/api/v1";
     endpoints.PackManifestUrl = "https://void-rp.ru/launcher/manifests/manifest.json";
+    endpoints.ServerListUrl = "https://api.void-rp.ru/api/v1/servers";
     endpoints.RuntimeSeedUrl = "https://void-rp.ru/launcher/runtime-seed";
     endpoints.RuntimeManifestBaseUrl = "https://void-rp.ru/launcher/manifests";
     endpoints.RegisterUrl = "https://void-rp.ru/register";
     endpoints.ForgotPasswordUrl = "https://void-rp.ru/forgot-password";
     endpoints.VerifyEmailUrl = "https://void-rp.ru/verify-email";
+}
+
+// Derive the server catalogue URL from the account API base when not explicitly
+// configured (e.g. older appsettings.json without the ServerListUrl key).
+if (string.IsNullOrWhiteSpace(endpoints.ServerListUrl) && !string.IsNullOrWhiteSpace(endpoints.AccountApiBaseUrl))
+{
+    endpoints.ServerListUrl = $"{endpoints.AccountApiBaseUrl.TrimEnd('/')}/servers";
 }
 
 builder.Services.AddSingleton(endpoints);
@@ -39,6 +47,7 @@ builder.Services.AddSingleton<ClientRepairService>();
 builder.Services.AddSingleton<RuntimeBootstrapService>();
 builder.Services.AddSingleton<LocalMinecraftLaunchService>();
 builder.Services.AddSingleton<LauncherStateService>();
+builder.Services.AddSingleton<ServerCatalogService>();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -82,6 +91,24 @@ app.MapPost("/api/auth/revoke-other-sessions", async (LauncherFacadeService faca
 
 app.MapPost("/api/actions/play", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.PlayAsync(CancellationToken.None)));
+
+// ── Multi-server catalogue ──────────────────────────────────────────────────
+app.MapGet("/api/servers", async (ServerCatalogService catalog) =>
+{
+    var servers = await catalog.GetServersAsync(CancellationToken.None);
+    return Results.Ok(new { servers, selectedSlug = catalog.GetSelectedSlug() });
+});
+
+app.MapPost("/api/servers/select", (ServerSelectDto dto, ServerCatalogService catalog) =>
+{
+    if (string.IsNullOrWhiteSpace(dto.Slug))
+    {
+        return Results.BadRequest(new { error = "slug is required" });
+    }
+
+    catalog.SelectServer(dto.Slug);
+    return Results.Ok(new { selectedSlug = catalog.GetSelectedSlug() });
+});
 
 app.MapPost("/api/actions/repair", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.RepairAsync(CancellationToken.None)));

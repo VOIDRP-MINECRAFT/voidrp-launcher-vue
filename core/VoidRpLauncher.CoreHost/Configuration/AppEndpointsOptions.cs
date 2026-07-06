@@ -4,6 +4,8 @@ public sealed class AppEndpointsOptions
 {
     public string AccountApiBaseUrl { get; set; } = string.Empty;
     public string PackManifestUrl { get; set; } = string.Empty;
+    // Multi-server: public catalogue endpoint returning the list of game servers.
+    public string ServerListUrl { get; set; } = string.Empty;
     public string SelfUpdateManifestUrl { get; set; } = string.Empty;
     public string RuntimeSeedUrl { get; set; } = string.Empty;
     public string RuntimeManifestBaseUrl { get; set; } = string.Empty;

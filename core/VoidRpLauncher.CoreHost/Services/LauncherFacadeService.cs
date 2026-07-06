@@ -32,6 +32,7 @@ public sealed class LauncherFacadeService
     private readonly LauncherStateService _stateService;
     private readonly DiagnosticsService _diagnostics;
     private readonly AppVersionService _appVersionService;
+    private readonly ServerCatalogService _serverCatalog;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private LauncherManifest? _cachedManifest;
 
@@ -47,9 +48,11 @@ public sealed class LauncherFacadeService
         LauncherPathsService pathsService,
         LauncherStateService stateService,
         DiagnosticsService diagnostics,
-        AppVersionService appVersionService)
+        AppVersionService appVersionService,
+        ServerCatalogService serverCatalog)
     {
         _endpoints = endpoints;
+        _serverCatalog = serverCatalog;
         _manifestService = manifestService;
         _fileSyncService = fileSyncService;
         _clientRepairService = clientRepairService;
@@ -229,7 +232,7 @@ public sealed class LauncherFacadeService
 
                 _stateService.SetProgress("Подготовка", "Загружаем pack manifest...", 0);
 
-                var manifest = await _manifestService.LoadAsync(_endpoints.PackManifestUrl, cancellationToken);
+                var manifest = await _manifestService.LoadAsync(_serverCatalog.ResolveManifestUrl(), cancellationToken);
                 _cachedManifest = manifest;
                 if (!string.IsNullOrWhiteSpace(manifest.MinLauncherVersion) &&
                     !_appVersionService.IsCurrentVersionAtLeast(manifest.MinLauncherVersion))
@@ -385,7 +388,7 @@ public sealed class LauncherFacadeService
         LauncherManifest manifest;
         try
         {
-            manifest = _cachedManifest ?? await _manifestService.LoadAsync(_endpoints.PackManifestUrl, cancellationToken);
+            manifest = _cachedManifest ?? await _manifestService.LoadAsync(_serverCatalog.ResolveManifestUrl(), cancellationToken);
             _cachedManifest = manifest;
         }
         catch (Exception ex)

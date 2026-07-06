@@ -182,6 +182,11 @@ public sealed class ModToggleDto
     public bool Enabled { get; set; }
 }
 
+public sealed class ServerSelectDto
+{
+    public string Slug { get; set; } = string.Empty;
+}
+
 public sealed class ModToggleResponseDto
 {
     public bool Ok { get; set; }
