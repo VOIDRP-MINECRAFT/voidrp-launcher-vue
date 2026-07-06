@@ -11,6 +11,7 @@ const route = useRoute()
 
 onMounted(() => {
   void launcher.initializeApp()
+  void launcher.fetchServers()
 })
 
 onBeforeUnmount(() => {

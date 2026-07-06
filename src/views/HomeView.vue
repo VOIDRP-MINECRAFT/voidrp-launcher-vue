@@ -5,6 +5,13 @@ import { useLauncherStore } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 
+const activeServer = computed(() =>
+  launcher.serverList.find((s) => s.slug === launcher.selectedSlug) ?? null,
+)
+const serverLabel = computed(() =>
+  activeServer.value ? `${activeServer.value.name} · ${activeServer.value.mcVersion}` : 'VoidRP · 1.21.1',
+)
+
 const serverOnline = computed(() => launcher.serverStatus?.online ?? null)
 const serverPlayers = computed(() => launcher.serverStatus?.playersOnline ?? 0)
 const serverMax = computed(() => launcher.serverStatus?.playersMax ?? 0)
@@ -76,7 +83,15 @@ const stats = computed(() => [
         <span class="text-[10px] font-medium text-white/55">{{ launcher.playerStats.minecraftNickname || '—' }}</span>
       </div>
 
-      <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/70">VoidRP · 1.21.1</p>
+      <div class="flex items-center gap-2.5">
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-violet-300/70">{{ serverLabel }}</p>
+        <RouterLink
+          to="/servers"
+          class="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[10px] font-semibold text-white/45 transition hover:border-violet-400/40 hover:text-white/80"
+        >
+          Сменить
+        </RouterLink>
+      </div>
 
       <h2 class="mt-2 text-2xl font-bold leading-tight text-white">
         {{ launcher.isBusy ? 'Подготовка к запуску...' : 'Всё готово к запуску' }}
