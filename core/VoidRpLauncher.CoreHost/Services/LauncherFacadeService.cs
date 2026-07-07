@@ -167,6 +167,9 @@ public sealed class LauncherFacadeService
     public async Task<OperationResponseDto> RefreshDashboardAsync(CancellationToken cancellationToken = default)
         => await RunExclusiveAsync(async () =>
         {
+            // Called on server switch: the cached manifest belongs to the previous
+            // server — drop it so the Mods tab reloads the new server's pack.
+            _cachedManifest = null;
             try
             {
                 if (_authSessionService.Snapshot?.IsAuthenticated == true)
