@@ -116,6 +116,19 @@ const rawNavGroups = [
   },
 ]
 
+// Feature required by each per-server route; direct navigation to a
+// disabled tab (stale route, server switch) shows a notice instead.
+const ROUTE_FEATURES: Record<string, string> = {
+  '/nation': 'nations',
+  '/leaderboard': 'leaderboards',
+  '/map': 'map',
+}
+
+const routeFeatureBlocked = computed(() => {
+  const feature = ROUTE_FEATURES[route.path]
+  return Boolean(feature) && !feat(feature)
+})
+
 // Hide tabs whose feature the active server disables; drop empty groups.
 const navGroups = computed(() =>
   rawNavGroups
@@ -299,7 +312,28 @@ watch(
       <!-- Main content -->
       <main class="panel panel--strong min-h-0 flex-1 overflow-hidden">
         <div class="h-full overflow-auto p-5">
-          <RouterView v-slot="{ Component }">
+          <!-- Раздел выключен на активном сервере (прямой переход/смена сервера) -->
+          <div v-if="routeFeatureBlocked" class="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white/40">
+              <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="9.5" />
+                <line x1="5.3" y1="5.3" x2="18.7" y2="18.7" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-lg font-bold text-white">Раздел недоступен</p>
+              <p class="mt-1 max-w-sm text-sm leading-6 text-white/45">
+                На сервере «{{ activeServer?.name || 'VoidRP' }}» этот раздел выключен.
+                Выбери другой сервер или вернись на главную.
+              </p>
+            </div>
+            <div class="mt-2 flex gap-2">
+              <RouterLink to="/home" class="btn-acc rounded-[13px] px-5 py-2.5 text-sm font-bold">На главную</RouterLink>
+              <RouterLink to="/servers" class="btn-glass rounded-[13px] px-5 py-2.5 text-sm font-medium text-white/70 hover:text-white">Сменить сервер</RouterLink>
+            </div>
+          </div>
+
+          <RouterView v-else v-slot="{ Component }">
             <Transition name="page" mode="out-in">
               <component :is="Component" :key="route.path" />
             </Transition>
