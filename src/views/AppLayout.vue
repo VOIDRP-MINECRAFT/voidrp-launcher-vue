@@ -150,11 +150,11 @@ watch(
   <div class="mx-auto flex h-full max-w-[1180px] flex-col gap-3 p-4">
 
     <!-- ── Header ─────────────────────────────────────────────────── -->
-    <header class="rounded-[24px] border border-white/10 bg-[#091022]/90 px-5 py-4 backdrop-blur-xl">
+    <header class="panel panel--strong panel--edge px-5 py-4">
       <div class="flex items-center gap-4">
 
         <!-- Avatar -->
-        <div class="relative h-11 w-11 shrink-0 overflow-hidden rounded-[14px] shadow-lg shadow-violet-500/20">
+        <div class="avatar-ring relative h-11 w-11 shrink-0 overflow-hidden rounded-[14px]">
           <img
             v-if="effectiveAvatarSrc && !avatarGone"
             :src="effectiveAvatarSrc"
@@ -203,14 +203,14 @@ watch(
         <!-- Actions -->
         <div class="flex shrink-0 items-center gap-2">
           <button
-            class="rounded-[14px] border border-white/10 bg-white/5 px-3.5 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
+            class="btn-glass rounded-[14px] px-3.5 py-2 text-sm text-white/60 hover:text-white"
             @click="launcher.logout()"
           >
             Выйти
           </button>
 
           <button
-            class="flex items-center gap-2 rounded-[14px] bg-gradient-to-r from-violet-500 to-indigo-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:brightness-110 hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:brightness-100"
+            class="btn-acc flex items-center gap-2 rounded-[14px] px-5 py-2 text-sm font-semibold"
             :disabled="!canPlay"
             @click="launcher.play()"
           >
@@ -234,7 +234,7 @@ watch(
     <!-- ── Progress ────────────────────────────────────────────────── -->
     <section
       v-if="launcher.shouldShowProgress"
-      class="rounded-[20px] border border-white/10 bg-[#091022]/85 px-5 py-3.5 backdrop-blur-xl"
+      class="panel panel--strong rounded-[20px] px-5 py-3.5"
     >
       <div class="flex items-center justify-between gap-3">
         <div class="min-w-0">
@@ -246,7 +246,7 @@ watch(
 
       <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
         <div
-          class="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 transition-all duration-300"
+          class="progress-acc h-full rounded-full transition-all duration-300"
           :style="{ width: `${launcher.progress.percent}%` }"
         ></div>
       </div>
@@ -256,10 +256,10 @@ watch(
     <div class="flex min-h-0 flex-1 gap-3">
 
       <!-- Sidebar -->
-      <aside class="flex w-[200px] shrink-0 flex-col rounded-[24px] border border-white/10 bg-[#091022]/85 p-3 backdrop-blur-xl">
+      <aside class="panel panel--strong flex w-[204px] shrink-0 flex-col p-3">
         <nav class="flex-1 space-y-4">
           <div v-for="group in navGroups" :key="group.label">
-            <p class="mb-1 px-3 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/25">
+            <p class="kicker mb-1.5 px-3 !text-[9px] opacity-60">
               {{ group.label }}
             </p>
 
@@ -268,19 +268,13 @@ watch(
                 v-for="item in group.items"
                 :key="item.to"
                 :to="item.to"
-                class="relative flex items-center gap-2.5 rounded-[12px] px-3 py-2 text-sm transition-all duration-150"
-                :class="route.path === item.to
-                  ? 'bg-violet-500/15 text-white'
-                  : 'text-white/50 hover:bg-white/5 hover:text-white/85'"
+                class="nav-item relative flex items-center gap-2.5 rounded-[12px] px-3 py-2 text-sm"
+                :class="{ 'nav-item--active': route.path === item.to }"
               >
-                <span
-                  v-if="route.path === item.to"
-                  class="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-violet-400"
-                ></span>
+                <span class="nav-item__bar" aria-hidden="true"></span>
 
                 <svg
-                  class="h-[15px] w-[15px] shrink-0 transition-colors"
-                  :class="route.path === item.to ? 'text-violet-300' : 'text-white/35'"
+                  class="nav-item__icon h-[15px] w-[15px] shrink-0"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke-width="1.8"
@@ -303,12 +297,63 @@ watch(
       </aside>
 
       <!-- Main content -->
-      <main class="min-h-0 flex-1 overflow-hidden rounded-[24px] border border-white/10 bg-[#091022]/85 backdrop-blur-xl">
+      <main class="panel panel--strong min-h-0 flex-1 overflow-hidden">
         <div class="h-full overflow-auto p-5">
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <Transition name="page" mode="out-in">
+              <component :is="Component" :key="route.path" />
+            </Transition>
+          </RouterView>
         </div>
       </main>
 
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Аватар: акцентное кольцо со свечением */
+.avatar-ring {
+  box-shadow:
+    0 0 0 1px rgba(var(--acc-rgb), 0.45),
+    0 6px 18px rgba(var(--acc-rgb), 0.28);
+}
+
+/* Пункты навигации */
+.nav-item {
+  color: rgba(255, 255, 255, 0.5);
+  transition: color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.nav-item:hover {
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateX(2px);
+}
+.nav-item__icon {
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 0.16s ease, filter 0.16s ease;
+}
+.nav-item:hover .nav-item__icon { color: rgba(255, 255, 255, 0.65); }
+
+.nav-item__bar {
+  position: absolute;
+  left: 0; top: 50%;
+  height: 16px; width: 3px;
+  transform: translateY(-50%) scaleY(0);
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(180deg, var(--acc-soft), var(--acc));
+  box-shadow: 0 0 10px rgba(var(--acc-rgb), 0.8);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-item--active {
+  color: #fff;
+  background: linear-gradient(90deg, rgba(var(--acc-rgb), 0.18), rgba(var(--acc-rgb), 0.06));
+  box-shadow: inset 0 0 0 1px rgba(var(--acc-rgb), 0.22);
+}
+.nav-item--active .nav-item__bar { transform: translateY(-50%) scaleY(1); }
+.nav-item--active .nav-item__icon {
+  color: var(--acc-soft);
+  filter: drop-shadow(0 0 6px rgba(var(--acc-rgb), 0.6));
+}
+</style>

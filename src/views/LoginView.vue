@@ -33,7 +33,7 @@ const coreOnline = computed(() => launcher.initialized)
       <div class="pointer-events-none absolute -inset-px rounded-[32px] bg-gradient-to-b from-violet-500/8 to-transparent opacity-0 transition duration-500"
         :class="{ 'opacity-100': canSubmit }"></div>
 
-      <div class="relative rounded-[30px] border border-white/10 bg-[#080f1e]/95 p-8 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      <div class="panel panel--strong panel--edge relative rounded-[30px] p-8 shadow-2xl shadow-black/40">
 
         <!-- Brand -->
         <div class="flex items-start justify-between gap-4">
@@ -73,7 +73,7 @@ const coreOnline = computed(() => launcher.initialized)
               type="text"
               autocomplete="username"
               placeholder="Введите логин"
-              class="h-11 w-full rounded-[14px] border border-white/10 bg-white/5 px-4 text-sm outline-none transition placeholder:text-white/20 focus:border-violet-400/50 focus:bg-white/8 focus:ring-1 focus:ring-violet-500/20"
+              class="input-modern h-11 w-full rounded-[14px] px-4 text-sm outline-none placeholder:text-white/20"
             />
           </label>
 
@@ -84,14 +84,14 @@ const coreOnline = computed(() => launcher.initialized)
               type="password"
               autocomplete="current-password"
               placeholder="Введите пароль"
-              class="h-11 w-full rounded-[14px] border border-white/10 bg-white/5 px-4 text-sm outline-none transition placeholder:text-white/20 focus:border-violet-400/50 focus:bg-white/8 focus:ring-1 focus:ring-violet-500/20"
+              class="input-modern h-11 w-full rounded-[14px] px-4 text-sm outline-none placeholder:text-white/20"
             />
           </label>
 
           <button
             type="submit"
             :disabled="!canSubmit"
-            class="mt-1 h-11 w-full rounded-[14px] bg-gradient-to-r from-violet-500 to-indigo-500 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition hover:brightness-110 hover:shadow-violet-500/35 disabled:cursor-not-allowed disabled:opacity-45"
+            class="btn-acc mt-1 h-11 w-full rounded-[14px] text-sm font-bold"
           >
             {{ launcher.isBusy ? 'Выполняем вход...' : 'Войти' }}
           </button>
@@ -106,7 +106,7 @@ const coreOnline = computed(() => launcher.initialized)
               { label: 'Подтвердить почту', url: launcher.links.verifyEmailUrl },
             ]"
             :key="label"
-            class="rounded-xl border border-white/8 bg-white/[0.04] px-3 py-1.5 text-xs text-white/50 transition hover:border-white/15 hover:bg-white/8 hover:text-white/80"
+            class="btn-glass rounded-xl px-3 py-1.5 text-xs text-white/50 hover:text-white/85"
             @click="launcher.openExternal(url)"
           >
             {{ label }}
@@ -127,7 +127,7 @@ const coreOnline = computed(() => launcher.initialized)
           </div>
           <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
             <div
-              class="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-400 transition-all duration-300"
+              class="progress-acc h-full rounded-full transition-all duration-300"
               :style="{ width: `${launcher.progress.percent}%` }"
             ></div>
           </div>

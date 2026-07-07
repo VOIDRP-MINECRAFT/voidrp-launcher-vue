@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLauncherStore } from './stores/launcher'
 import ToastHost from './components/ToastHost.vue'
@@ -34,15 +34,53 @@ watch(
   },
   { immediate: true }
 )
+
+// ── Per-server accent theme ────────────────────────────────────────────────
+// The active server's accent_color drives the --acc* CSS vars on the app
+// root; every accent in the UI (incl. remapped violet utilities) follows it.
+const ACCENT_FALLBACK = '#8b5cf6'
+
+function parseHex(hex: string | null | undefined): [number, number, number] {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '')
+  if (!m) return [139, 92, 246]
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+function mixRgb(a: number[], b: number[], t: number) {
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t))
+}
+
+const themeVars = computed(() => {
+  const active = launcher.serverList.find((s) => s.slug === launcher.selectedSlug)
+  const base = parseHex(active?.accentColor || ACCENT_FALLBACK)
+  const second = mixRgb(base, [30, 20, 90], 0.3) // глубже и чуть синее — второй стоп градиентов
+  const soft = mixRgb(base, [255, 255, 255], 0.3)
+  const pale = mixRgb(base, [255, 255, 255], 0.56)
+  const rgb = (c: number[]) => c.join(', ')
+  const hex = (c: number[]) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('')
+  return {
+    '--acc': hex(base),
+    '--acc-2': hex(second),
+    '--acc-soft': hex(soft),
+    '--acc-pale': hex(pale),
+    '--acc-rgb': rgb(base),
+    '--acc-2-rgb': rgb(second),
+    '--acc-soft-rgb': rgb(soft),
+  }
+})
 </script>
 
 <template>
-  <div class="min-h-screen w-full overflow-hidden bg-[#04070d] text-white">
+  <div class="min-h-screen w-full overflow-hidden bg-[var(--bg-0)] text-white" :style="themeVars">
+    <!-- Ambient background: aurora + noise + vignette -->
     <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div class="absolute left-1/2 top-0 h-[360px] w-[720px] -translate-x-1/2 bg-violet-600/10 blur-3xl"></div>
-      <div class="absolute bottom-0 right-0 h-[320px] w-[320px] bg-fuchsia-500/10 blur-3xl"></div>
-      <div class="absolute left-0 top-1/3 h-[260px] w-[260px] bg-cyan-400/10 blur-3xl"></div>
+      <div class="aurora aurora--1"></div>
+      <div class="aurora aurora--2"></div>
+      <div class="aurora aurora--3"></div>
     </div>
+    <div class="bg-noise"></div>
+    <div class="vignette"></div>
 
     <div class="relative z-10 h-screen w-full">
       <RouterView />

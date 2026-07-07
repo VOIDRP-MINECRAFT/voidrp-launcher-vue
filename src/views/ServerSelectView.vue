@@ -73,7 +73,7 @@ function goHome() {
         </div>
 
         <button
-          class="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-white/40 transition hover:border-white/20 hover:bg-white/8 hover:text-white/80"
+          class="btn-glass shrink-0 rounded-xl p-2 text-white/40 hover:text-white/85"
           title="Закрыть"
           @click="goHome"
         >
@@ -105,7 +105,7 @@ function goHome() {
           class="group relative flex w-full items-center gap-3.5 rounded-[20px] border p-3.5 text-left transition duration-150"
           :class="pending === s.slug
             ? 'border-violet-400/50 bg-violet-500/10 shadow-lg shadow-violet-500/10'
-            : 'border-white/10 bg-[#080f1e]/80 hover:border-white/20 hover:bg-white/[0.05]'"
+            : 'border-white/10 bg-white/[0.035] hover:border-white/20 hover:bg-white/[0.06]'"
           @click="pick(s)"
         >
           <!-- Icon -->
@@ -179,7 +179,7 @@ function goHome() {
           </template>
         </div>
         <button
-          class="flex shrink-0 items-center gap-2 rounded-[14px] bg-gradient-to-r from-violet-500 to-indigo-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/25 transition hover:brightness-110 hover:shadow-violet-500/40 disabled:cursor-not-allowed disabled:opacity-45"
+          class="btn-acc flex shrink-0 items-center gap-2 rounded-[14px] px-6 py-2.5 text-sm font-bold"
           :disabled="!pending || committing"
           @click="confirm"
         >

@@ -191,6 +191,7 @@ public sealed class GameServerDto
     public bool Maintenance { get; set; }
     public bool IsDefault { get; set; }
     public string? MapUrl { get; set; }
+    public string? AccentColor { get; set; }
     public Dictionary<string, bool>? Features { get; set; }
     public GameServerStatusDto? Status { get; set; }
 }

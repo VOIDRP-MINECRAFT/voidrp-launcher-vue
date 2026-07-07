@@ -133,7 +133,7 @@ function selectServer(slug: string) {
       <!-- Actions -->
       <div class="mt-6 flex flex-wrap items-center gap-2.5">
         <button
-          class="flex items-center gap-2.5 rounded-[16px] bg-gradient-to-r from-violet-500 to-indigo-500 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-violet-500/30 transition hover:brightness-110 hover:shadow-violet-500/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none disabled:hover:brightness-100"
+          class="btn-acc flex items-center gap-2.5 rounded-[16px] px-8 py-3.5 text-base font-bold"
           :disabled="!canPlay"
           @click="launcher.play()"
         >
@@ -151,7 +151,7 @@ function selectServer(slug: string) {
         </button>
 
         <button
-          class="rounded-[16px] border border-white/15 bg-black/25 px-5 py-3.5 text-sm font-medium text-white/70 backdrop-blur-md transition hover:bg-black/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+          class="btn-glass rounded-[16px] px-5 py-3.5 text-sm font-medium text-white/70 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="launcher.isBusy"
           @click="launcher.repair()"
         >
