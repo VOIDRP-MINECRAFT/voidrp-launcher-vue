@@ -145,6 +145,32 @@ public sealed class ServerCatalogService
         return _endpoints.PackManifestUrl;
     }
 
+    /// <summary>
+    /// Runtime-seed URL for the selected server; falls back to the launcher-global
+    /// <see cref="AppEndpointsOptions.RuntimeSeedUrl"/> when the server doesn't set one.
+    /// </summary>
+    public string ResolveRuntimeSeedUrl()
+    {
+        var selected = GetSelectedServer();
+        if (selected is not null && !string.IsNullOrWhiteSpace(selected.RuntimeSeedUrl))
+        {
+            return selected.RuntimeSeedUrl!;
+        }
+
+        return _endpoints.RuntimeSeedUrl;
+    }
+
+    /// <summary>
+    /// Per-server runtime-manifest URL override (direct .json link or a base URL);
+    /// null when the selected server doesn't define one.
+    /// </summary>
+    public string? ResolveRuntimeManifestUrlOverride()
+    {
+        var selected = GetSelectedServer();
+        var url = selected?.RuntimeManifestUrl;
+        return string.IsNullOrWhiteSpace(url) ? null : url;
+    }
+
     private sealed class SelectionState
     {
         public string? Slug { get; set; }
@@ -186,6 +212,8 @@ public sealed class GameServerDto
     public string McVersion { get; set; } = string.Empty;
     public string Loader { get; set; } = string.Empty;
     public string? ManifestUrl { get; set; }
+    public string? RuntimeSeedUrl { get; set; }
+    public string? RuntimeManifestUrl { get; set; }
     public int MaxPlayers { get; set; }
     public string WhitelistMode { get; set; } = "public";
     public bool Maintenance { get; set; }

@@ -16,18 +16,21 @@ public sealed class RuntimeBootstrapService
     private readonly LauncherPathsService _pathsService;
     private readonly HashService _hashService;
     private readonly DiagnosticsService _diagnostics;
+    private readonly ServerCatalogService _serverCatalog;
     private readonly SemaphoreSlim _runtimeLock = new(1, 1);
 
     public RuntimeBootstrapService(
         AppEndpointsOptions endpoints,
         LauncherPathsService pathsService,
         HashService hashService,
-        DiagnosticsService diagnostics)
+        DiagnosticsService diagnostics,
+        ServerCatalogService serverCatalog)
     {
         _endpoints = endpoints;
         _pathsService = pathsService;
         _hashService = hashService;
         _diagnostics = diagnostics;
+        _serverCatalog = serverCatalog;
     }
 
     public async Task EnsureRuntimeAsync(Action<string, double>? progress = null, CancellationToken cancellationToken = default)
@@ -37,6 +40,10 @@ public sealed class RuntimeBootstrapService
         {
             _pathsService.EnsureBaseDirectories();
             progress?.Invoke("Проверяем Java runtime...", 0);
+
+            // Best-effort: make sure the server catalogue is loaded so the
+            // per-server runtime seed/manifest overrides can be resolved.
+            await _serverCatalog.EnsureLoadedAsync(cancellationToken);
 
             var hasJava = TryResolveExistingRuntime(out var existingJavaPath);
             if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
@@ -114,7 +121,11 @@ public sealed class RuntimeBootstrapService
     {
         var fallbackUrl = BuildFallbackManifestUrl();
 
-        if (string.IsNullOrWhiteSpace(_endpoints.RuntimeSeedUrl))
+        // Per-server seed URL when the selected server defines one, else the
+        // launcher-global endpoint.
+        var seedUrl = _serverCatalog.ResolveRuntimeSeedUrl();
+
+        if (string.IsNullOrWhiteSpace(seedUrl))
         {
             _diagnostics.Warn("Runtime", $"RuntimeSeedUrl is empty. Fallback to {fallbackUrl}");
             return fallbackUrl;
@@ -123,7 +134,7 @@ public sealed class RuntimeBootstrapService
         try
         {
             using var client = new HttpClient();
-            using var response = await client.GetAsync(AddCacheBuster(_endpoints.RuntimeSeedUrl), cancellationToken);
+            using var response = await client.GetAsync(AddCacheBuster(seedUrl), cancellationToken);
             response.EnsureSuccessStatusCode();
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -147,13 +158,25 @@ public sealed class RuntimeBootstrapService
 
     private string BuildFallbackManifestUrl()
     {
+        var fileName = _pathsService.Platform.RuntimeManifestFileName;
+
+        // Per-server override: a direct .json link is used as-is, anything else
+        // is treated as a base URL and gets the platform manifest file appended.
+        var overrideUrl = _serverCatalog.ResolveRuntimeManifestUrlOverride();
+        if (!string.IsNullOrWhiteSpace(overrideUrl))
+        {
+            var trimmed = overrideUrl.TrimEnd('/');
+            return trimmed.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : $"{trimmed}/{fileName}";
+        }
+
         var baseUrl = _endpoints.RuntimeManifestBaseUrl?.TrimEnd('/') ?? string.Empty;
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
             throw new InvalidOperationException("RuntimeManifestBaseUrl is not configured.");
         }
 
-        var fileName = _pathsService.Platform.RuntimeManifestFileName;
         return $"{baseUrl}/{fileName}";
     }
 
