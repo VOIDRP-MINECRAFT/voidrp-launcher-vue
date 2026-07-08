@@ -13,6 +13,7 @@ public sealed class LauncherStateService
     private string _statusText = "Инициализация лаунчера...";
     private string _accountPrimaryText = "Гость";
     private string _accountSecondaryText = "Войдите, чтобы запустить игру";
+    private bool _accountIsAdmin;
     private string _emailVerifiedText = "Требуется вход";
     private LauncherProgressDto _progress = new();
     private LauncherAuthSnapshot? _snapshot;
@@ -85,6 +86,7 @@ public sealed class LauncherStateService
                 _accountPrimaryText = "Гость";
                 _accountSecondaryText = "Войдите, чтобы запустить игру";
                 _emailVerifiedText = "Требуется вход";
+                _accountIsAdmin = false;
                 return;
             }
 
@@ -93,6 +95,7 @@ public sealed class LauncherStateService
                 : snapshot.PlayerAccount.MinecraftNickname;
             _accountSecondaryText = $"{snapshot.User.SiteLogin} • {snapshot.User.Email}";
             _emailVerifiedText = snapshot.User.EmailVerified ? "Почта подтверждена" : "Почта не подтверждена";
+            _accountIsAdmin = snapshot.User.IsAdmin;
         }
     }
 
@@ -123,6 +126,7 @@ public sealed class LauncherStateService
                 LauncherVersionText = appVersionService.CurrentVersion,
                 AccountPrimaryText = _accountPrimaryText,
                 AccountSecondaryText = _accountSecondaryText,
+                AccountIsAdmin = _accountIsAdmin,
                 EmailVerifiedText = _emailVerifiedText,
                 CurrentMemoryMb = settings.MaxRamMb,
                 CurrentMemoryText = $"{settings.MaxRamMb / 1024.0:0.0} GB",

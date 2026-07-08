@@ -58,6 +58,7 @@ public sealed class UserReadDto
     [JsonPropertyName("email")] public string Email { get; set; } = string.Empty;
     [JsonPropertyName("email_verified")] public bool EmailVerified { get; set; }
     [JsonPropertyName("is_active")] public bool IsActive { get; set; }
+    [JsonPropertyName("is_admin")] public bool IsAdmin { get; set; }
     [JsonPropertyName("created_at")] public DateTimeOffset CreatedAt { get; set; }
 }
 

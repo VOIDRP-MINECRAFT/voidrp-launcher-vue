@@ -16,13 +16,15 @@ const bgStyle = computed(() => {
 
 const online = computed(() => activeServer.value?.status?.online ?? null)
 const maintenance = computed(() => activeServer.value?.maintenance ?? false)
-// Block launch when the server is explicitly offline or under maintenance.
+// Тех. работы блокируют запуск для всех, кроме админов; офлайн — для всех.
+const maintenanceBlocks = computed(() => maintenance.value && !launcher.accountIsAdmin)
 // (online === null means status unknown/loading — still allow.)
-const canPlay = computed(() => !launcher.isBusy && online.value !== false && !maintenance.value)
+const canPlay = computed(() => !launcher.isBusy && online.value !== false && !maintenanceBlocks.value)
 const playLabel = computed(() => {
   if (launcher.isBusy) return 'Подготовка...'
-  if (maintenance.value) return 'Тех. работы'
   if (online.value === false) return 'Сервер офлайн'
+  if (maintenanceBlocks.value) return 'Тех. работы'
+  if (maintenance.value) return 'Играть · тех. работы'
   return 'Играть'
 })
 
@@ -141,7 +143,7 @@ function selectServer(slug: string) {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z"/>
           </svg>
-          <svg v-else-if="online === false || maintenance" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg v-else-if="online === false || maintenanceBlocks" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="9"/><line x1="8" y1="12" x2="16" y2="12"/>
           </svg>
           <svg v-else class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">

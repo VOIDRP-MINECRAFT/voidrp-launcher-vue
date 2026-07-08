@@ -97,6 +97,7 @@ public sealed class LauncherStateDto
     public string LauncherVersionText { get; set; } = string.Empty;
     public string AccountPrimaryText { get; set; } = string.Empty;
     public string AccountSecondaryText { get; set; } = string.Empty;
+    public bool AccountIsAdmin { get; set; }
     public string EmailVerifiedText { get; set; } = string.Empty;
     public int CurrentMemoryMb { get; set; }
     public string CurrentMemoryText { get; set; } = string.Empty;

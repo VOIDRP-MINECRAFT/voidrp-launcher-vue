@@ -45,11 +45,14 @@ function feat(key: string) {
 // explicitly offline or under maintenance (unknown/loading status still allows).
 const playOnline = computed(() => activeServer.value?.status?.online ?? null)
 const playMaintenance = computed(() => activeServer.value?.maintenance ?? false)
-const canPlay = computed(() => !launcher.isBusy && playOnline.value !== false && !playMaintenance.value)
+// Тех. работы блокируют запуск для всех, кроме админов; офлайн — для всех.
+const maintenanceBlocks = computed(() => playMaintenance.value && !launcher.accountIsAdmin)
+const canPlay = computed(() => !launcher.isBusy && playOnline.value !== false && !maintenanceBlocks.value)
 const playLabel = computed(() => {
   if (launcher.isBusy) return 'Подготовка...'
-  if (playMaintenance.value) return 'Тех. работы'
   if (playOnline.value === false) return 'Сервер офлайн'
+  if (maintenanceBlocks.value) return 'Тех. работы'
+  if (playMaintenance.value) return 'Играть · тех. работы'
   return 'Играть'
 })
 
@@ -231,7 +234,7 @@ watch(
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            <svg v-else-if="playOnline === false || playMaintenance" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg v-else-if="playOnline === false || maintenanceBlocks" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="9" /><line x1="8" y1="12" x2="16" y2="12" />
             </svg>
             <svg v-else class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">

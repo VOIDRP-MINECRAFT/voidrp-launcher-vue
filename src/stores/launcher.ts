@@ -94,6 +94,7 @@ interface LauncherState {
   launcherVersionText: string
   accountPrimaryText: string
   accountSecondaryText: string
+  accountIsAdmin: boolean
   emailVerifiedText: string
   currentMemoryMb: number
   currentMemoryText: string
@@ -202,6 +203,7 @@ function defaultState(): LauncherState {
     launcherVersionText: '0.0.0',
     accountPrimaryText: 'Гость',
     accountSecondaryText: 'Войдите, чтобы запустить игру',
+    accountIsAdmin: false,
     emailVerifiedText: 'Требуется вход',
     currentMemoryMb: 4096,
     currentMemoryText: '4.0 GB',
@@ -343,6 +345,7 @@ export const useLauncherStore = defineStore('launcher', () => {
     state.launcherVersionText = String(next.launcherVersionText ?? state.launcherVersionText)
     state.accountPrimaryText = String(next.accountPrimaryText ?? state.accountPrimaryText)
     state.accountSecondaryText = String(next.accountSecondaryText ?? state.accountSecondaryText)
+    state.accountIsAdmin = Boolean(next.accountIsAdmin ?? state.accountIsAdmin)
     state.emailVerifiedText = String(next.emailVerifiedText ?? state.emailVerifiedText)
     state.currentMemoryMb = Number(next.currentMemoryMb ?? state.currentMemoryMb)
     state.currentMemoryText = String(next.currentMemoryText ?? state.currentMemoryText)
@@ -772,6 +775,7 @@ export const useLauncherStore = defineStore('launcher', () => {
     statusText: computed(() => state.statusText),
     launcherVersionText: computed(() => state.launcherVersionText),
     accountPrimaryText: computed(() => state.accountPrimaryText),
+    accountIsAdmin: computed(() => state.accountIsAdmin),
     accountSecondaryText: computed(() => state.accountSecondaryText),
     emailVerifiedText: computed(() => state.emailVerifiedText),
     currentMemoryMb: computed(() => state.currentMemoryMb),
