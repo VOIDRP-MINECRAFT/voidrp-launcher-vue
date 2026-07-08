@@ -428,6 +428,12 @@ export const useLauncherStore = defineStore('launcher', () => {
         initProgress.value = 55
         state.statusText = 'Загрузка профиля...'
         applyState(response.state)
+        initProgress.value = 65
+        // Узнаём выбранный сервер ДО первых scoped-запросов (battle pass,
+        // статус сервера) — иначе они уходят без X-Server-Slug и бэкенд
+        // отвечает данными дефолтного сервера.
+        state.statusText = 'Загрузка серверов...'
+        await fetchServers()
         initProgress.value = 75
         if (response.state?.isAuthenticated) {
           state.statusText = 'Загрузка скина...'
@@ -505,8 +511,9 @@ export const useLauncherStore = defineStore('launcher', () => {
       selectedSlug.value = slug
     }
     // Refresh view-local data (battle pass) for the new server.
-    const nick = state.dashboard?.playerStats?.minecraftNickname
-    if (nick) void fetchBattlePass(nick)
+    bpProfile.value = null
+    const nick = state.accountPrimaryText
+    if (nick && nick !== 'Гость') void fetchBattlePass(nick)
     return selectedSlug.value
   }
 

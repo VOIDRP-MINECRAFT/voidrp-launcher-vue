@@ -4,6 +4,15 @@ import { useLauncherStore } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 
+const activeServer = computed(() =>
+  launcher.serverList.find((s) => s.slug === launcher.selectedSlug) ?? null,
+)
+// Battle pass показываем, только если он не выключен у активного сервера.
+const bpEnabled = computed(() => {
+  const f = activeServer.value?.features
+  return !f || f.battlepass !== false
+})
+
 type Tab = 'profile' | 'skin' | 'security'
 const activeTab = ref<Tab>('profile')
 
@@ -103,7 +112,7 @@ const tabs: { key: Tab; label: string }[] = [
       </section>
 
       <!-- Battle Pass -->
-      <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
+      <section v-if="bpEnabled" class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
         <div class="flex items-center justify-between">
           <p class="text-sm font-semibold">Battle Pass</p>
           <span
