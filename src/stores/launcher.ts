@@ -424,10 +424,18 @@ export const useLauncherStore = defineStore('launcher', () => {
   async function initializeApp() {
     if (bootstrapPromise) return bootstrapPromise
     bootstrapPromise = (async () => {
+      // /api/bootstrap blocks while CoreHost downloads the Java runtime + pack.
+      // Poll /api/state during it so the splash shows live progress (current
+      // file + %) instead of a frozen "Подключение к ядру..." label.
+      let bootstrapPoll: number | null = window.setInterval(() => { void pollStateOnce() }, 500)
+      const stopBootstrapPoll = () => {
+        if (bootstrapPoll != null) { window.clearInterval(bootstrapPoll); bootstrapPoll = null }
+      }
       try {
         initProgress.value = 10
         state.statusText = 'Подключение к ядру...'
         const response = await readJson<OperationResponse>('/api/bootstrap')
+        stopBootstrapPoll()
         initProgress.value = 55
         state.statusText = 'Загрузка профиля...'
         applyState(response.state)
@@ -457,6 +465,7 @@ export const useLauncherStore = defineStore('launcher', () => {
         startServerStatusPolling()
         initProgress.value = 100
       } catch (error: unknown) {
+        stopBootstrapPoll()
         initProgress.value = 0
         pushToast('error', 'Ядро лаунчера недоступно', sanitizeError(error) || 'Не удалось связаться с локальным ядром.')
       }

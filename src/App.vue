@@ -9,6 +9,14 @@ const launcher = useLauncherStore()
 const router = useRouter()
 const route = useRoute()
 
+// Prefer CoreHost's live download progress (real % + current file) during the
+// bootstrap phase; fall back to the coarse init steps when it's not reporting.
+const splashProgress = computed(() => {
+  const p = launcher.progress
+  return p?.visible && p.percent > 0 ? p.percent : launcher.initProgress
+})
+const splashDetail = computed(() => (launcher.progress?.visible ? launcher.progress.details : ''))
+
 onMounted(() => {
   void launcher.initializeApp()
   void launcher.fetchServers()
@@ -91,7 +99,8 @@ const themeVars = computed(() => {
       <SplashScreen
         v-if="!launcher.initialized"
         :status-text="launcher.statusText"
-        :progress="launcher.initProgress"
+        :detail="splashDetail"
+        :progress="splashProgress"
       />
     </Transition>
   </div>

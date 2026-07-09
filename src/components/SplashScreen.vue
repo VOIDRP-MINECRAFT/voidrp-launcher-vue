@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ statusText: string; progress?: number }>()
+defineProps<{ statusText: string; detail?: string; progress?: number }>()
 
 function particleStyle(i: number) {
   // Golden-angle spiral distribution for uniform spread
@@ -105,6 +105,9 @@ function particleStyle(i: number) {
     <!-- Status -->
     <div class="mt-9 flex flex-col items-center gap-3">
       <p class="status-text">{{ statusText || 'Инициализация...' }}</p>
+
+      <!-- Live detail: current file being downloaded -->
+      <p class="detail-text" :class="{ 'opacity-0': !detail }">{{ detail || ' ' }}</p>
 
       <!-- Progress bar -->
       <div class="progress-track">
@@ -252,6 +255,22 @@ function particleStyle(i: number) {
   font-size: 11px;
   letter-spacing: 0.07em;
   color: rgba(255,255,255,0.3);
+}
+
+/* Live file/detail line under the phase label */
+.detail-text {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(var(--acc-soft-rgb), 0.55);
+  max-width: 340px;
+  min-height: 13px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: -6px;
+  transition: opacity 0.25s;
 }
 
 /* ── Progress bar ───────────────────────────────────────────── */
