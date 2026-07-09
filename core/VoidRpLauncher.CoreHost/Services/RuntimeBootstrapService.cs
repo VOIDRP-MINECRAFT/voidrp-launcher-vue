@@ -38,12 +38,15 @@ public sealed class RuntimeBootstrapService
         await _runtimeLock.WaitAsync(cancellationToken);
         try
         {
+            // Resolve the active server first so all per-server directories
+            // (game, java, runtime state) point at servers/<slug>/ before we
+            // create them. Loads the catalogue so per-server runtime seed/
+            // manifest overrides can be resolved too.
+            await _serverCatalog.EnsureLoadedAsync(cancellationToken);
+            _serverCatalog.ApplyActiveServerToPaths();
+
             _pathsService.EnsureBaseDirectories();
             progress?.Invoke("Проверяем Java runtime...", 0);
-
-            // Best-effort: make sure the server catalogue is loaded so the
-            // per-server runtime seed/manifest overrides can be resolved.
-            await _serverCatalog.EnsureLoadedAsync(cancellationToken);
 
             var hasJava = TryResolveExistingRuntime(out var existingJavaPath);
             if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
@@ -70,7 +73,7 @@ public sealed class RuntimeBootstrapService
             // Fast path: Java exists AND manifest fingerprint matches stored stamp → skip file sync.
             if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
             {
-                var stampPath = Path.Combine(_pathsService.StateDirectory, "runtime.stamp");
+                var stampPath = Path.Combine(_pathsService.ServerStateDirectory, "runtime.stamp");
                 var fingerprint = ComputeManifestFingerprint(manifest);
                 if (File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == fingerprint)
                 {
@@ -88,7 +91,7 @@ public sealed class RuntimeBootstrapService
             }
 
             // Write manifest fingerprint so next launch can skip file sync.
-            try { File.WriteAllText(Path.Combine(_pathsService.StateDirectory, "runtime.stamp"), ComputeManifestFingerprint(manifest)); }
+            try { File.WriteAllText(Path.Combine(_pathsService.ServerStateDirectory, "runtime.stamp"), ComputeManifestFingerprint(manifest)); }
             catch { }
 
             _diagnostics.Info("Runtime", $"Runtime prepared: {installedJavaPath}");

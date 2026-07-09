@@ -320,6 +320,10 @@ public sealed class LauncherFacadeService
 
             try
             {
+                // Repair the currently-selected server's install, not a stale one.
+                await _serverCatalog.EnsureLoadedAsync(cancellationToken);
+                _serverCatalog.ApplyActiveServerToPaths();
+
                 var repairProgress = new Progress<string>(message =>
                     _stateService.SetProgress("Ремонт", message, 50));
 

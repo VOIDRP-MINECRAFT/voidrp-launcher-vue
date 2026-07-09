@@ -99,14 +99,135 @@ public sealed class LauncherPathsService
     public LauncherPlatformInfo Platform => _platformService.Current;
     public string BaseDirectory { get; }
     public string LauncherInstallDirectory { get; }
-    public string GameDirectory => Path.Combine(BaseDirectory, "game");
+
+    // The slug of the server whose files are currently active. Set dynamically
+    // from the backend catalogue (never hardcoded), so every server — including
+    // ones added later — gets its own isolated install under servers/<slug>/.
+    public string? ActiveServerSlug { get; private set; }
+
+    // Per-server root: servers/<slug>. When no server is active yet (very first
+    // run, fully offline) we fall back to the legacy single-server layout so
+    // existing installs keep working until the catalogue resolves the slug.
+    private string? ServerRootDirectory =>
+        string.IsNullOrEmpty(ActiveServerSlug) ? null : Path.Combine(BaseDirectory, "servers", ActiveServerSlug);
+
+    public string GameDirectory => ServerRootDirectory is null
+        ? Path.Combine(BaseDirectory, "game")
+        : Path.Combine(ServerRootDirectory, "game");
     public string VersionsDirectory => Path.Combine(GameDirectory, "versions");
     public string JavaDirectory => Path.Combine(GameDirectory, "java");
     public string LogsDirectory => Path.Combine(BaseDirectory, "logs");
+    // Global launcher state shared across all servers (auth tokens, play-tickets,
+    // server selection, launcher settings, hash cache).
     public string StateDirectory => Path.Combine(BaseDirectory, "state");
+    // Per-server sync/runtime bookkeeping (sync-state json, runtime.stamp) so
+    // switching servers never confuses one install's state for another's.
+    public string ServerStateDirectory => ServerRootDirectory is null
+        ? StateDirectory
+        : Path.Combine(ServerRootDirectory, "state");
     public string TempDirectory => Path.Combine(BaseDirectory, "temp");
     public string SelfUpdateDirectory => Path.Combine(TempDirectory, "self-update");
     public string SettingsFilePath => Path.Combine(BaseDirectory, "launcher_settings.json");
+
+    /// <summary>
+    /// Points all per-server directories (game, java, versions, sync state) at
+    /// servers/&lt;slug&gt;. Slug comes from the backend catalogue, so any new
+    /// server is isolated automatically. When <paramref name="isDefault"/> is
+    /// true and a legacy single-server install exists, it is relocated once.
+    /// </summary>
+    public void SetActiveServer(string? slug, bool isDefault = false)
+    {
+        ActiveServerSlug = string.IsNullOrWhiteSpace(slug) ? null : SanitizeSlug(slug);
+        if (ActiveServerSlug is not null && isDefault)
+        {
+            TryMigrateLegacyLayout();
+        }
+    }
+
+    // The pre-multi-server launcher stored everything under BaseDirectory/game.
+    // The first time the default server becomes active we relocate that install
+    // into servers/<slug>/game via a rename (instant on the same volume) so
+    // existing players don't re-download the whole pack. Best-effort: on any
+    // failure the normal sync path simply rebuilds a fresh install. Guarded by
+    // dir checks, so it is idempotent and safe to call repeatedly.
+    private void TryMigrateLegacyLayout()
+    {
+        try
+        {
+            var legacyGame = Path.Combine(BaseDirectory, "game");
+            var targetGame = GameDirectory;
+            if (Directory.Exists(legacyGame)
+                && !Directory.Exists(targetGame)
+                && !string.Equals(Path.GetFullPath(legacyGame), Path.GetFullPath(targetGame), StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Path.GetDirectoryName(targetGame);
+                if (!string.IsNullOrWhiteSpace(parent)) Directory.CreateDirectory(parent);
+                Directory.Move(legacyGame, targetGame);
+                CleanupLegacyGlobalState();
+            }
+        }
+        catch
+        {
+            // ignore — sync will recreate the game directory from the manifest
+        }
+    }
+
+    // Files that stay in the global state dir and are shared across all servers —
+    // never removed by legacy cleanup.
+    private static readonly HashSet<string> GlobalStateFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "launcher-auth.json", "play-ticket.json", "selected-server.json", "hash-cache.json",
+    };
+
+    // After migrating the legacy install we remove the now-orphaned per-server
+    // bookkeeping that used to live in the global state dir: the old
+    // runtime.stamp and any sync-state <packName>.json files. Shared global
+    // files (auth, play-ticket, selection, hash cache) are never touched — a
+    // *.json is deleted only if it is actually a sync-state (top-level "files"
+    // array) and not in the shared allowlist.
+    private void CleanupLegacyGlobalState()
+    {
+        try
+        {
+            var stateDir = StateDirectory;
+            if (!Directory.Exists(stateDir)) return;
+
+            var stamp = Path.Combine(stateDir, "runtime.stamp");
+            if (File.Exists(stamp)) { try { File.Delete(stamp); } catch { } }
+
+            foreach (var json in Directory.EnumerateFiles(stateDir, "*.json", SearchOption.TopDirectoryOnly))
+            {
+                if (GlobalStateFileNames.Contains(Path.GetFileName(json))) continue;
+                if (IsSyncStateFile(json))
+                {
+                    try { File.Delete(json); } catch { }
+                }
+            }
+        }
+        catch { }
+    }
+
+    private static bool IsSyncStateFile(string path)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("files", out var files)
+                && files.ValueKind == JsonValueKind.Array;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string SanitizeSlug(string slug)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(slug.Trim().Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? "default" : cleaned;
+    }
 
     public LauncherPathsService(LauncherPlatformService platformService)
     {
@@ -143,6 +264,7 @@ public sealed class LauncherPathsService
         Directory.CreateDirectory(JavaDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(StateDirectory);
+        Directory.CreateDirectory(ServerStateDirectory);
         Directory.CreateDirectory(TempDirectory);
         Directory.CreateDirectory(SelfUpdateDirectory);
     }
@@ -472,7 +594,7 @@ public sealed class FileSyncService
         _pathsService.EnsureBaseDirectories();
 
         var normalizedSyncKey = SanitizeFileName(syncKey);
-        var stateFilePath = Path.Combine(_pathsService.StateDirectory, $"{normalizedSyncKey}.json");
+        var stateFilePath = Path.Combine(_pathsService.ServerStateDirectory, $"{normalizedSyncKey}.json");
         var logFilePath = Path.Combine(_pathsService.LogsDirectory, $"sync-{normalizedSyncKey}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
         var currentManifestPaths = manifest.Files.Select(f => NormalizeRelativePath(f.Path)).Where(p => !string.IsNullOrWhiteSpace(p)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var previousState = await LoadStateAsync(stateFilePath, cancellationToken);
@@ -859,8 +981,8 @@ public sealed class ClientRepairService
         progress?.Report("Читаем состояние клиента...");
         _diagnostics.Info("Repair", "Reading launcher state files.");
 
-        var stateFiles = Directory.Exists(_pathsService.StateDirectory)
-            ? Directory.GetFiles(_pathsService.StateDirectory, "*.json", SearchOption.TopDirectoryOnly)
+        var stateFiles = Directory.Exists(_pathsService.ServerStateDirectory)
+            ? Directory.GetFiles(_pathsService.ServerStateDirectory, "*.json", SearchOption.TopDirectoryOnly)
             : Array.Empty<string>();
 
         var managedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

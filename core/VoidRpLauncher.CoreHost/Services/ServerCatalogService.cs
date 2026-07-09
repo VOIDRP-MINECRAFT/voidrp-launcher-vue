@@ -85,7 +85,35 @@ public sealed class ServerCatalogService
             _diagnostics.Warn("ServerCatalog", $"Failed to fetch server list: {ex.Message}");
         }
 
+        // Now that the catalogue (and thus the default server / IsDefault flags)
+        // is known, make the on-disk paths reflect the active server.
+        ApplyActiveServerToPaths();
         return _cache;
+    }
+
+    /// <summary>
+    /// Pushes the effective server slug into <see cref="LauncherPathsService"/>
+    /// so every per-server directory (game, java, versions, sync/runtime state)
+    /// resolves under servers/&lt;slug&gt;. Fully slug-driven: any server added
+    /// to the backend catalogue is isolated automatically, no code changes.
+    /// </summary>
+    public void ApplyActiveServerToPaths()
+    {
+        var server = GetSelectedServer();
+        if (server is not null && !string.IsNullOrWhiteSpace(server.Slug))
+        {
+            _paths.SetActiveServer(server.Slug, server.IsDefault);
+            return;
+        }
+
+        // Offline / catalogue unavailable: use the saved slug if we have one.
+        // IsDefault is unknown here, so legacy migration is deferred until the
+        // catalogue loads and this runs again with the real default flag.
+        var slug = GetSelectedSlug();
+        if (!string.IsNullOrWhiteSpace(slug))
+        {
+            _paths.SetActiveServer(slug, isDefault: false);
+        }
     }
 
     /// <summary>Loads the catalogue once if it hasn't been fetched yet (best-effort).</summary>
@@ -128,6 +156,9 @@ public sealed class ServerCatalogService
         {
             _diagnostics.Warn("ServerCatalog", $"Failed to persist server selection: {ex.Message}");
         }
+
+        // Switch on-disk paths to the newly selected server immediately.
+        ApplyActiveServerToPaths();
     }
 
     /// <summary>
