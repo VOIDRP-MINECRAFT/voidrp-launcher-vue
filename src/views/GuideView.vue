@@ -1,21 +1,18 @@
 <script setup lang="ts">
 const limits = [
-  { label: 'Макс. объём привата', value: '20 000 000', hint: '≈ 200×200×500 блоков' },
-  { label: 'Приватов на игрока', value: '16', hint: 'по умолчанию' },
+  { label: 'Приватных чанков', value: '100', hint: '1 чанк = 16×16 блоков' },
+  { label: 'Force-load чанков', value: '25', hint: 'грузятся без игроков' },
   { label: 'Домов (/sethome)', value: '2', hint: 'на аккаунт' },
 ]
 
 const regionCommands = [
-  { cmd: '//wand', desc: 'Палочка выделения (деревянный топор)' },
-  { cmd: 'ЛКМ по блоку', desc: 'Первый угол выделения' },
-  { cmd: 'ПКМ по блоку', desc: 'Второй угол выделения' },
-  { cmd: '/rg claim <название>', desc: 'Создать привата в выделённой области' },
-  { cmd: '/rg info', desc: 'Информация о привате под ногами' },
-  { cmd: '/rg list', desc: 'Список своих приватов' },
-  { cmd: '/rg addmember <привата> <игрок>', desc: 'Добавить участника' },
-  { cmd: '/rg removemember <привата> <игрок>', desc: 'Убрать участника' },
-  { cmd: '/rg flag <привата> <флаг> <значение>', desc: 'Настроить флаг (allow / deny / none)' },
-  { cmd: '/rg remove <название>', desc: 'Удалить привата' },
+  { cmd: 'Миникарта', desc: 'В углу экрана — карта FTB Chunks с сеткой чанков' },
+  { cmd: 'Клавиша карты', desc: 'Открыть большую карту (забинди в «Управление» → FTB Chunks)' },
+  { cmd: 'ЛКМ по чанку', desc: 'Заклеймить чанк — приват, защита от чужих' },
+  { cmd: 'ПКМ по чанку', desc: 'Снять клейм с чанка' },
+  { cmd: 'Shift + ЛКМ', desc: 'Force-load: чанк работает, даже когда тебя нет рядом' },
+  { cmd: '/ftbteams party create <имя>', desc: 'Создать команду — общий доступ к приватам' },
+  { cmd: '/ftbteams party invite <игрок>', desc: 'Пригласить игрока в свою команду' },
 ]
 
 const tpCommands = [
@@ -49,13 +46,12 @@ const nationOfficerCommands = [
 ]
 
 const tierGates = [
-  { epoch: 'Эпоха механизмов', item: 'Андезитовая машинная рама', mod: 'Create', color: '#f59e0b' },
-  { epoch: 'Эпоха стали',      item: 'Стальной корпус',           mod: 'Mekanism', color: '#38bdf8' },
-  { epoch: 'Эпоха автоматизации', item: 'МЭ-контроллер',          mod: 'AE2', color: '#a78bfa' },
-  { epoch: 'Квантовая эпоха',  item: 'Квантовая схема',           mod: 'AE2 + Mekanism', color: '#22d3ee' },
-  { epoch: 'Эпоха реакторов',  item: 'Ядро реактора',             mod: 'Extreme Reactors 2', color: '#fb923c' },
-  { epoch: 'Эпоха дракона',    item: 'Дракониевое ядро',          mod: 'Draconic Evolution', color: '#f472b6' },
-  { epoch: 'Эндгейм',          item: 'Катализатор бесконечности', mod: 'Avaritia', color: '#4ade80' },
+  { epoch: 'Магия',       item: 'Заклинания, мана и урон',        mod: 'Puffish Skills', color: '#a78bfa' },
+  { epoch: 'Ближний бой', item: 'Урон и выживаемость',            mod: 'Puffish Skills', color: '#f87171' },
+  { epoch: 'Дальний бой', item: 'Луки, арбалеты, точность',       mod: 'Puffish Skills', color: '#34d399' },
+  { epoch: 'Атлетика',    item: 'Скорость, прыжок, выносливость', mod: 'Puffish Skills', color: '#38bdf8' },
+  { epoch: 'Добыча',      item: 'Копание и бонусы к руде',        mod: 'Puffish Skills', color: '#fbbf24' },
+  { epoch: 'Защита',      item: 'Броня, сопротивление, HP',       mod: 'Puffish Skills', color: '#fb923c' },
 ]
 
 const modCategories = [
@@ -64,54 +60,48 @@ const modCategories = [
     mods: [
       { name: 'Create', info: 'Шестерни, пресс, миксер, deployer, конвейер. Основа прогрессии.' },
       { name: 'Immersive Engineering', info: 'Сталь через коксовую и доменную печи. Единственный источник стали.' },
-      { name: 'Mekanism', info: '4–5× обогащение руды, цифровой шахтёр, телепортер, генераторы.' },
+      { name: 'Mekanism', info: '2–5× обогащение руды, цифровой шахтёр, телепортер, генераторы.' },
       { name: 'Applied Energistics 2', info: 'ME-сеть: централизованное хранение и автокрафт через процессоры.' },
       { name: 'Industrial Foregoing', info: 'Фермы растений и мобов, лазерный бур, пластиковая цепочка.' },
-      { name: 'Extreme Reactors 2', info: 'Многоблочный ядерный реактор и турбина — энергия для финала.' },
     ],
   },
   {
-    name: 'Магия',
+    name: 'Навыки и RPG',
     mods: [
-      { name: 'Mahou Tsukai', info: 'Знаки (махоудзин), бабочка-фамильяр, телепортация, щит. Нужна для рецептов.' },
-      { name: 'Aether', info: 'Небесное измерение. Данжи, небесный янтарь и нефрит для техно-магических крафтов.' },
+      { name: 'Puffish Skills', info: 'Дерево навыков: Магия, Ближний/Дальний бой, Атлетика, Добыча, Защита.' },
+      { name: 'Puffish Attributes', info: 'Расширенные атрибуты под навыки и снаряжение.' },
+      { name: 'Сигилы сброса', info: 'Обнуляют выбранную ветку навыков — в магазине и Battle Pass.' },
     ],
   },
   {
-    name: 'Боссы и измерения',
+    name: 'Боссы и эндгейм',
     mods: [
-      { name: "L_Ender's Cataclysm", info: 'Игнис, Левиафан, Сцилла, Харбингер — боссы с уникальным дропом для финала.' },
-      { name: 'Twilight Forest', info: 'Параллельное измерение с цепочкой боссов. Тёмное ядро и поздние ворота.' },
-      { name: 'Deeper Darker', info: 'Расширение Древних Городов: новые боссы, блоки Sculk и поздние печати.' },
-      { name: 'Draconic Evolution', info: 'Драконьи и хаотические ядра, реактор, броня — предпоследний уровень.' },
-      { name: 'Avaritia', info: 'Финал: Экстремальный верстак, слиток бесконечности, катализатор.' },
+      { name: "L_Ender's Cataclysm", info: 'Игнис, Левиафан, Сцилла, Харбингер — боссы с уникальным дропом.' },
+      { name: 'Draconic Evolution', info: 'Дракониевые ядра, крафт слияния, реактор, огромная энергия.' },
+      { name: 'Эволюция (FTB Evolution)', info: 'Эксклюзив: сингулярность, арканум, трансцендентство — вершина.' },
     ],
   },
   {
     name: 'Комфорт',
     mods: [
-      { name: 'Sophisticated Backpacks', info: 'Рюкзаки с апгрейдами: авто-подбор, сортировка, компактное хранение.' },
-      { name: "Tom's Simple Storage", info: 'Простая сеть хранения без сложной настройки — используй до AE2.' },
-      { name: 'Supplementaries', info: 'Верёвки, флаги, пушки, фонари. Пушки не ломают блоки в приватах.' },
+      { name: 'Sophisticated Backpacks', info: 'Рюкзаки с апгрейдами: авто-подбор, сортировка, хранение.' },
+      { name: "Farmer's Delight", info: 'Готовка, блюда и урожай — стабильная еда на старте.' },
+      { name: 'Supplementaries', info: 'Верёвки, флаги, фонари, доски объявлений, декор.' },
       { name: 'Waystones', info: 'Камни путешественника — телепортация между точками. Бесплатная на спавн.' },
-      { name: 'Carry On', info: 'Поднять блок-сущность (сундук, хопер) пустой рукой + Shift. Блокируется в приватах.' },
     ],
   },
 ]
 
 const progressionRoute = [
-  'Ваниль+ / выживание',
-  "Farmer's Delight / еда",
+  'Выживание + Farmer\'s Delight',
   'Create / первая механика',
-  'Aether + Mahou Tsukai / магия',
   'Immersive Engineering / сталь',
-  'Twilight Forest + Deeper Darker',
-  'Mekanism / промышленность',
+  'Mekanism / энергия',
   'AE2 / хранение и автокрафт',
-  'Industrial Foregoing / автоматизация',
+  'Industrial Foregoing / фермы',
   "L_Ender's Cataclysm / боссы",
   'Draconic Evolution',
-  'Avaritia / финал',
+  'Эволюция / эндгейм',
 ]
 </script>
 
@@ -145,10 +135,10 @@ const progressionRoute = [
       <div class="rounded-[18px] border border-white/10 bg-white/[0.035] p-4">
         <div class="mb-3 flex items-center gap-2">
           <span class="h-2 w-2 rounded-full bg-violet-400"></span>
-          <p class="text-xs font-semibold text-white/80">Приваты (WorldGuard)</p>
+          <p class="text-xs font-semibold text-white/80">Приваты (FTB Chunks)</p>
         </div>
         <p class="mb-3 text-[11px] leading-5 text-white/40">
-          Выдели область деревянным топором (//wand), затем создай привата командой /rg claim.
+          Открой карту FTB Chunks и кликай по клеткам-чанкам. Союзники добавляются через команды FTB Teams.
         </p>
         <div class="space-y-1.5">
           <div
@@ -239,8 +229,8 @@ const progressionRoute = [
 
     <!-- Tier gates -->
     <div class="rounded-[18px] border border-white/10 bg-white/[0.035] p-4">
-      <p class="mb-1 text-[10px] uppercase tracking-[0.22em] text-white/35">Эпохи прогрессии — что нужно скрафтить</p>
-      <p class="mb-4 text-[11px] text-white/40">При первом крафте предмета сервер фиксирует эпоху и сообщает всем. Каждая открывается один раз.</p>
+      <p class="mb-1 text-[10px] uppercase tracking-[0.22em] text-white/35">Навыки персонажа (Puffish Skills)</p>
+      <p class="mb-4 text-[11px] text-white/40">6 веток навыков — вкладывай очки под свой стиль. Дерево навыков открывается клавишей (по умолчанию K). Сброс ветки — Сигилом из магазина или Battle Pass.</p>
       <div class="grid grid-cols-4 gap-2">
         <div
           v-for="gate in tierGates"
