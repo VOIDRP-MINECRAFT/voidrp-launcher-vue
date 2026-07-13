@@ -4,6 +4,16 @@ import { useLauncherStore, BACKEND_BASE, SITE_BASE } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 
+// Per-server feature gating (mirrors AppLayout): a feature is enabled unless the
+// active server explicitly disables it.
+const activeServer = computed(() =>
+  launcher.serverList.find((s) => s.slug === launcher.selectedSlug) ?? null,
+)
+function feat(key: string) {
+  const f = activeServer.value?.features
+  return !f || f[key] !== false
+}
+
 function openPlayer(nick: string) { launcher.openExternal(`${SITE_BASE}/u/${nick}`) }
 function openNation(slug: string) { launcher.openExternal(`${SITE_BASE}/nation/${slug}`) }
 const PUBLIC_API = BACKEND_BASE
@@ -35,6 +45,21 @@ interface NationRankingResponse { items: NationRankingItem[] }
 
 type MainTab = 'progression' | 'players' | 'nations'
 const mainTab = ref<MainTab>('progression')
+
+// Which per-server feature each tab needs. Age progression and nations are hidden
+// on servers that lack them (e.g. the anarchy server); the top-players tab uses the
+// generic "leaderboards" feature.
+const TAB_FEATURE: Record<MainTab, string> = {
+  progression: 'progression',
+  players: 'leaderboards',
+  nations: 'nations',
+}
+const TAB_LABELS: Record<MainTab, string> = {
+  progression: 'Прогрессия', players: 'Игроки', nations: 'Государства',
+}
+const visibleTabs = computed<MainTab[]>(() =>
+  (['progression', 'players', 'nations'] as MainTab[]).filter((t) => feat(TAB_FEATURE[t])),
+)
 
 const TAB_ICONS: Record<MainTab, string> = {
   progression: 'M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z',
@@ -88,14 +113,32 @@ const playersData = ref<PlayerTopResponse | null>(null)
 const activePlayerCat = ref('')
 const playersError = ref('')
 
-const activePlayerCategory = computed<PlayerTopCategory | null>(() => {
-  if (!playersData.value || !activePlayerCat.value) return null
-  return playersData.value.categories.find(c => c.key === activePlayerCat.value) ?? null
+// Categories that only make sense with the matching feature — hide "richest"
+// (balance) without an economy, quests without the quests system. Also hide any
+// category that has no real data yet (all zero), like on the anarchy server.
+const CATEGORY_FEATURE: Record<string, string> = {
+  balance: 'economy',
+  completed_quests: 'quests',
+}
+const visiblePlayerCategories = computed<PlayerTopCategory[]>(() => {
+  if (!playersData.value) return []
+  return playersData.value.categories.filter((c) => {
+    const req = CATEGORY_FEATURE[c.key]
+    if (req && !feat(req)) return false
+    if (!c.entries.length) return false
+    return c.entries.some((e) => Number(e.value) > 0)
+  })
 })
 
-function fmtPlayerValue(value: number, unit: string): string {
-  const n = new Intl.NumberFormat('ru-RU').format(Math.floor(value))
-  return unit ? `${n} ${unit}` : n
+const activePlayerCategory = computed<PlayerTopCategory | null>(() => {
+  if (!activePlayerCat.value) return null
+  return visiblePlayerCategories.value.find(c => c.key === activePlayerCat.value) ?? null
+})
+
+function fmtPlayerValue(entry: PlayerTopEntry, cat: PlayerTopCategory): string {
+  if (cat.key === 'kd') return entry.value.toFixed(2)
+  const n = new Intl.NumberFormat('ru-RU').format(Math.floor(entry.value))
+  return cat.unit ? `${n} ${cat.unit}` : n
 }
 
 // ─── Nations ─────────────────────────────────────────────────────────────────
@@ -163,7 +206,9 @@ async function loadPlayers() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data: PlayerTopResponse = await resp.json()
     playersData.value = data
-    if (data.categories.length && !activePlayerCat.value) activePlayerCat.value = data.categories[0].key
+    if (!activePlayerCat.value || !visiblePlayerCategories.value.some(c => c.key === activePlayerCat.value)) {
+      activePlayerCat.value = visiblePlayerCategories.value[0]?.key ?? ''
+    }
   } catch { playersError.value = 'Не удалось загрузить топ игроков.' }
   finally { loadingPlayers.value = false }
 }
@@ -226,6 +271,14 @@ onMounted(() => {
   loadMyProgression()
 })
 
+// Keep the active tab valid for the current server: if the feature behind it is
+// disabled, fall back to the first visible tab (and load its data).
+watch(visibleTabs, (tabs) => {
+  if (tabs.length && !tabs.includes(mainTab.value)) {
+    switchTab(tabs[0])
+  }
+}, { immediate: true })
+
 // Re-scope all data when the player switches servers.
 watch(() => launcher.selectedSlug, () => {
   leaderboard.value = null
@@ -245,9 +298,9 @@ watch(() => launcher.selectedSlug, () => {
   <div class="space-y-3">
 
     <!-- ── Main tab bar ─────────────────────────────────────────── -->
-    <div class="flex gap-1 rounded-[18px] border border-white/10 bg-white/[0.03] p-1">
+    <div v-if="visibleTabs.length > 1" class="flex gap-1 rounded-[18px] border border-white/10 bg-white/[0.03] p-1">
       <button
-        v-for="tab in (['progression', 'players', 'nations'] as MainTab[])"
+        v-for="tab in visibleTabs"
         :key="tab"
         type="button"
         class="flex flex-1 items-center justify-center gap-2 rounded-[13px] py-2 text-xs font-semibold transition"
@@ -257,7 +310,7 @@ watch(() => launcher.selectedSlug, () => {
         <svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" :d="TAB_ICONS[tab]" />
         </svg>
-        {{ tab === 'progression' ? 'Прогрессия' : tab === 'players' ? 'Игроки' : 'Государства' }}
+        {{ TAB_LABELS[tab] }}
       </button>
     </div>
 
@@ -378,7 +431,7 @@ watch(() => launcher.selectedSlug, () => {
         <template v-else-if="playersData">
           <div class="flex flex-wrap gap-1.5 px-4 py-3">
             <button
-              v-for="cat in playersData.categories"
+              v-for="cat in visiblePlayerCategories"
               :key="cat.key"
               type="button"
               class="rounded-full px-2.5 py-1 text-[11px] font-medium transition"
@@ -408,7 +461,7 @@ watch(() => launcher.selectedSlug, () => {
                 {{ entry.minecraft_nickname }}
                 <span v-if="entry.minecraft_nickname.toLowerCase() === myNick?.toLowerCase()" class="ml-1.5 text-[10px] font-normal text-violet-300/70">· ты</span>
               </p>
-              <p class="shrink-0 text-sm font-semibold text-white/80">{{ fmtPlayerValue(entry.value, activePlayerCategory.unit) }}</p>
+              <p class="shrink-0 text-sm font-semibold text-white/80">{{ fmtPlayerValue(entry, activePlayerCategory) }}</p>
             </div>
           </div>
         </template>

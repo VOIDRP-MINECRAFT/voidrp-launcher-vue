@@ -12,6 +12,11 @@ const bpEnabled = computed(() => {
   const f = activeServer.value?.features
   return !f || f.battlepass !== false
 })
+// Баланс/экономику показываем только на серверах с экономикой (не на анархии).
+const econEnabled = computed(() => {
+  const f = activeServer.value?.features
+  return !f || f.economy !== false
+})
 
 type Tab = 'profile' | 'skin' | 'security'
 const activeTab = ref<Tab>('profile')
@@ -97,8 +102,8 @@ const tabs: { key: Tab; label: string }[] = [
           </div>
         </div>
 
-        <div class="mt-5 grid grid-cols-2 gap-3">
-          <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
+        <div class="mt-5 grid gap-3" :class="econEnabled ? 'grid-cols-2' : 'grid-cols-1'">
+          <div v-if="econEnabled" class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
             <p class="text-2xl font-bold">{{ fmt(launcher.walletBalance) }}</p>
             <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Баланс</p>
           </div>

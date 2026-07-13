@@ -10,21 +10,39 @@ function fmt(value: number | string | null | undefined) {
   return new Intl.NumberFormat('ru-RU').format(Number.isFinite(n) ? n : 0)
 }
 
+// Per-server feature gating (mirrors AppLayout): a feature is enabled unless the
+// active server explicitly disables it.
+const activeServer = computed(() =>
+  launcher.serverList.find((s) => s.slug === launcher.selectedSlug) ?? null,
+)
+function feat(key: string) {
+  const f = activeServer.value?.features
+  return !f || f[key] !== false
+}
+
 const hasNation = computed(() => Boolean(launcher.nation.title))
 
-const stats = computed(() => [
-  { label: 'Баланс', value: fmt(launcher.walletBalance), sub: 'монет', accent: 'from-amber-400/40 to-amber-600/0', dot: 'bg-amber-400' },
+// `feature: undefined` = always shown (combat/time stats make sense on every
+// server); economy/nation/quest cards are hidden where the feature is off.
+const allStats = computed(() => [
+  { feature: 'economy', label: 'Баланс', value: fmt(launcher.walletBalance), sub: 'монет', accent: 'from-amber-400/40 to-amber-600/0', dot: 'bg-amber-400' },
   {
+    feature: 'nations',
     label: 'Государство',
     value: hasNation.value ? (launcher.nation.tag ? `[${launcher.nation.tag}]` : launcher.nation.title) : '—',
     sub: hasNation.value ? launcher.nation.role || 'участник' : 'не состоит',
     accent: 'from-violet-400/40 to-violet-600/0', dot: 'bg-violet-400',
   },
-  { label: 'Казна', value: fmt(launcher.nationStats.treasuryBalance), sub: 'монет', accent: 'from-indigo-400/40 to-indigo-600/0', dot: 'bg-indigo-400' },
-  { label: 'Территория', value: fmt(launcher.nationStats.territoryPoints), sub: 'очков', accent: 'from-sky-400/40 to-sky-600/0', dot: 'bg-sky-400' },
-  { label: 'PvP убийства', value: fmt(launcher.playerStats.pvpKills), sub: 'личные', accent: 'from-rose-400/40 to-rose-600/0', dot: 'bg-rose-400' },
-  { label: 'Квесты', value: fmt(launcher.playerStats.completedQuests), sub: 'выполнено', accent: 'from-emerald-400/40 to-emerald-600/0', dot: 'bg-emerald-400' },
+  { feature: 'nations', label: 'Казна', value: fmt(launcher.nationStats.treasuryBalance), sub: 'монет', accent: 'from-indigo-400/40 to-indigo-600/0', dot: 'bg-indigo-400' },
+  { feature: 'nations', label: 'Территория', value: fmt(launcher.nationStats.territoryPoints), sub: 'очков', accent: 'from-sky-400/40 to-sky-600/0', dot: 'bg-sky-400' },
+  { feature: undefined, label: 'PvP убийства', value: fmt(launcher.playerStats.pvpKills), sub: 'личные', accent: 'from-rose-400/40 to-rose-600/0', dot: 'bg-rose-400' },
+  { feature: undefined, label: 'Убийства мобов', value: fmt(launcher.playerStats.mobKills), sub: 'всего', accent: 'from-orange-400/40 to-orange-600/0', dot: 'bg-orange-400' },
+  { feature: undefined, label: 'Смерти', value: fmt(launcher.playerStats.deaths), sub: 'всего', accent: 'from-slate-400/40 to-slate-600/0', dot: 'bg-slate-400' },
+  { feature: undefined, label: 'В игре', value: fmt(Math.floor((launcher.playerStats.totalPlaytimeMinutes ?? 0) / 60)), sub: 'часов', accent: 'from-teal-400/40 to-teal-600/0', dot: 'bg-teal-400' },
+  { feature: 'quests', label: 'Квесты', value: fmt(launcher.playerStats.completedQuests), sub: 'выполнено', accent: 'from-emerald-400/40 to-emerald-600/0', dot: 'bg-emerald-400' },
 ])
+
+const stats = computed(() => allStats.value.filter((s) => !s.feature || feat(s.feature)))
 </script>
 
 <template>
