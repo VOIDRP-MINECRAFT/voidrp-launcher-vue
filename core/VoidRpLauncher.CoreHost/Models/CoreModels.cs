@@ -27,6 +27,11 @@ public sealed class LauncherManifestFile
     public string Sha256 { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
     public bool AlwaysOverwrite { get; set; }
+    // Managed asset: hash-synced even if it lives under a player-writable dir (config/).
+    // Downloaded when missing or when its SHA-256 differs from the manifest, but not
+    // force-overwritten blindly — so shipping a new version updates existing clients,
+    // while a matching local copy is skipped (no needless re-download).
+    public bool Managed { get; set; }
     public bool Optional { get; set; }
     public bool Required { get; set; }
     public string DisplayName { get; set; } = string.Empty;

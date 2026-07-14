@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http.Json;
@@ -350,8 +351,8 @@ public sealed class HashService
     private static readonly JsonSerializerOptions CacheJson = new() { WriteIndented = false };
 
     private readonly string _cacheFilePath;
-    private readonly Dictionary<string, HashCacheEntry> _cache;
-    private bool _dirty;
+    private readonly ConcurrentDictionary<string, HashCacheEntry> _cache;
+    private volatile bool _dirty;
 
     public HashService(LauncherPathsService pathsService)
     {
@@ -420,13 +421,13 @@ public sealed class HashService
         throw new IOException($"Unable to read file for SHA-256: {filePath}", lastError);
     }
 
-    private Dictionary<string, HashCacheEntry> TryLoadCache()
+    private ConcurrentDictionary<string, HashCacheEntry> TryLoadCache()
     {
         try
         {
             if (!File.Exists(_cacheFilePath)) return new();
             var json = File.ReadAllText(_cacheFilePath);
-            return JsonSerializer.Deserialize<Dictionary<string, HashCacheEntry>>(json, CacheJson) ?? new();
+            return JsonSerializer.Deserialize<ConcurrentDictionary<string, HashCacheEntry>>(json, CacheJson) ?? new();
         }
         catch { return new(); }
     }
@@ -566,7 +567,22 @@ public sealed class ManifestService
 
 public sealed class FileSyncService
 {
-    private static readonly HttpClient HttpClient = new();
+    // Bounded parallelism for the check + download phase. 8 keeps per-file latency
+    // hidden without overwhelming the CDN/nginx connection limits. HTTP/2 lets these
+    // multiplex over a single connection when the server supports it.
+    private const int SyncConcurrency = 8;
+
+    private static readonly HttpClient HttpClient = new(new SocketsHttpHandler
+    {
+        MaxConnectionsPerServer = SyncConcurrency,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        AutomaticDecompression = System.Net.DecompressionMethods.All
+    })
+    {
+        DefaultRequestVersion = System.Net.HttpVersion.Version20,
+        DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+    };
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private readonly LauncherPathsService _pathsService;
@@ -609,81 +625,104 @@ public sealed class FileSyncService
         _diagnostics.Info("Sync", $"Sync started. Key={normalizedSyncKey}, files={manifest.Files.Count}");
 
         var orderedFiles = manifest.Files.OrderBy(f => NormalizeRelativePath(f.Path), StringComparer.OrdinalIgnoreCase).ToList();
-        for (var index = 0; index < orderedFiles.Count; index++)
+        var totalFiles = orderedFiles.Count;
+        var logLock = new object();
+        var completed = 0;
+
+        // StreamWriter is not thread-safe; serialize all log writes behind a lock.
+        void Log(string line)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var entry = orderedFiles[index];
-            var relativePath = NormalizeRelativePath(entry.Path);
-            if (string.IsNullOrWhiteSpace(relativePath)) continue;
+            lock (logLock) logWriter.WriteLine(line);
+        }
 
-            var localPath = Path.Combine(_pathsService.GameDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            var localDirectory = Path.GetDirectoryName(localPath);
-            if (!string.IsNullOrWhiteSpace(localDirectory))
-                Directory.CreateDirectory(localDirectory);
-
+        void ReportFileDone(string relativePath, string localPath, LauncherManifestFile entry)
+        {
+            var done = Interlocked.Increment(ref completed);
             progress?.Report(new SyncProgressInfo
             {
-                Stage = "Проверяем файл",
+                Stage = "Синхронизация файлов",
                 CurrentFile = relativePath,
-                ProcessedFiles = index,
-                TotalFiles = orderedFiles.Count,
-                Percent = CalculateSyncPercent(index, orderedFiles.Count, 0),
-                DetailMessage = "Проверяем наличие, размер и SHA-256...",
-                LocalPath = localPath,
-                SourceUrl = entry.Url
-            });
-
-            // Skip disabled optional mods and delete local copy so Minecraft won't load them
-            if (entry.Optional && !entry.Required &&
-                disabledOptionalMods?.Contains(relativePath) == true)
-            {
-                await logWriter.WriteLineAsync($"[SKIP-DISABLED] {relativePath}");
-                if (File.Exists(localPath))
-                {
-                    try
-                    {
-                        File.Delete(localPath);
-                        DeleteEmptyParentDirectories(localPath, _pathsService.GameDirectory);
-                        await logWriter.WriteLineAsync($"[DELETE-DISABLED] {relativePath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        await logWriter.WriteLineAsync($"[DELETE-DISABLED-FAILED] {relativePath} :: {ex.Message}");
-                    }
-                }
-                continue;
-            }
-
-            var needsDownload = NeedsDownload(entry, localPath, relativePath);
-            if (needsDownload)
-            {
-                _diagnostics.Info("Sync", $"Downloading: {relativePath}");
-                await logWriter.WriteLineAsync($"[DOWNLOAD] {relativePath}");
-                await DownloadFileAsync(entry, relativePath, localPath, index, orderedFiles.Count, progress, cancellationToken);
-            }
-            else if (IsPlayerWritable(relativePath) && File.Exists(localPath))
-            {
-                await logWriter.WriteLineAsync($"[SKIP-PLAYER] {relativePath}");
-            }
-            else
-            {
-                await logWriter.WriteLineAsync($"[OK] {relativePath}");
-            }
-
-            progress?.Report(new SyncProgressInfo
-            {
-                Stage = "Файл готов",
-                CurrentFile = relativePath,
-                ProcessedFiles = index + 1,
-                TotalFiles = orderedFiles.Count,
-                Percent = orderedFiles.Count == 0 ? 85 : ((double)(index + 1) / orderedFiles.Count) * 85.0,
-                DetailMessage = "Файл актуален и готов к использованию.",
+                ProcessedFiles = done,
+                TotalFiles = totalFiles,
+                Percent = totalFiles == 0 ? 85 : ((double)done / totalFiles) * 85.0,
+                DetailMessage = $"Готово {done} из {totalFiles} файлов.",
                 LocalPath = localPath,
                 SourceUrl = entry.Url,
                 CurrentFileBytesDownloaded = entry.Size,
                 CurrentFileBytesTotal = entry.Size
             });
         }
+
+        async ValueTask ProcessOneAsync(LauncherManifestFile entry, CancellationToken ct)
+        {
+            var relativePath = NormalizeRelativePath(entry.Path);
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                Interlocked.Increment(ref completed);
+                return;
+            }
+
+            var localPath = Path.Combine(_pathsService.GameDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var localDirectory = Path.GetDirectoryName(localPath);
+            if (!string.IsNullOrWhiteSpace(localDirectory))
+                Directory.CreateDirectory(localDirectory);
+
+            // Skip disabled optional mods and delete local copy so Minecraft won't load them
+            if (entry.Optional && !entry.Required &&
+                disabledOptionalMods?.Contains(relativePath) == true)
+            {
+                Log($"[SKIP-DISABLED] {relativePath}");
+                if (File.Exists(localPath))
+                {
+                    try
+                    {
+                        File.Delete(localPath);
+                        DeleteEmptyParentDirectories(localPath, _pathsService.GameDirectory);
+                        Log($"[DELETE-DISABLED] {relativePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"[DELETE-DISABLED-FAILED] {relativePath} :: {ex.Message}");
+                    }
+                }
+                ReportFileDone(relativePath, localPath, entry);
+                return;
+            }
+
+            if (NeedsDownload(entry, localPath, relativePath))
+            {
+                _diagnostics.Info("Sync", $"Downloading: {relativePath}");
+                Log($"[DOWNLOAD] {relativePath}");
+                progress?.Report(new SyncProgressInfo
+                {
+                    Stage = "Скачиваем файлы",
+                    CurrentFile = relativePath,
+                    ProcessedFiles = Volatile.Read(ref completed),
+                    TotalFiles = totalFiles,
+                    Percent = totalFiles == 0 ? 85 : ((double)Volatile.Read(ref completed) / totalFiles) * 85.0,
+                    DetailMessage = $"Скачиваем {relativePath} ({FormatBytes(entry.Size)})",
+                    LocalPath = localPath,
+                    SourceUrl = entry.Url
+                });
+                await DownloadFileAsync(entry, localPath, ct);
+            }
+            else if (!entry.Managed && IsPlayerWritable(relativePath) && File.Exists(localPath))
+            {
+                Log($"[SKIP-PLAYER] {relativePath}");
+            }
+            else
+            {
+                Log($"[OK] {relativePath}");
+            }
+
+            ReportFileDone(relativePath, localPath, entry);
+        }
+
+        await Parallel.ForEachAsync(orderedFiles, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = SyncConcurrency,
+            CancellationToken = cancellationToken
+        }, ProcessOneAsync);
 
         var staleFiles = previousState.Files.Except(currentManifestPaths, StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
         for (var index = 0; index < staleFiles.Count; index++)
@@ -791,7 +830,9 @@ public sealed class FileSyncService
     {
         if (!File.Exists(localPath)) return true;
         if (entry.AlwaysOverwrite) return true;
-        if (IsPlayerWritable(relativePath)) return false;
+        // Player-editable files are shipped once and never re-asserted, so local edits survive.
+        // Managed assets are the exception: verify them by hash so new versions reach clients.
+        if (!entry.Managed && IsPlayerWritable(relativePath)) return false;
 
         var fileInfo = new FileInfo(localPath);
         if (fileInfo.Length != entry.Size) return true;
@@ -812,8 +853,9 @@ public sealed class FileSyncService
             || normalized.StartsWith("config/", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task DownloadFileAsync(LauncherManifestFile entry, string relativePath, string localPath, int fileIndex, int totalFiles, IProgress<SyncProgressInfo>? progress, CancellationToken cancellationToken)
+    private async Task DownloadFileAsync(LauncherManifestFile entry, string localPath, CancellationToken cancellationToken)
     {
+        // Per-download temp name is unique per relative path, so concurrent downloads never collide.
         var tempPath = localPath + ".download";
         if (File.Exists(tempPath)) File.Delete(tempPath);
 
@@ -822,38 +864,10 @@ public sealed class FileSyncService
             using var response = await HttpClient.GetAsync(entry.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            var totalBytes = response.Content.Headers.ContentLength > 0 ? response.Content.Headers.ContentLength.Value : entry.Size;
-
             await using (var sourceStream = await response.Content.ReadAsStreamAsync(cancellationToken))
             await using (var targetStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                var buffer = new byte[1024 * 64];
-                long downloadedBytes = 0;
-
-                while (true)
-                {
-                    var read = await sourceStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
-                    if (read <= 0) break;
-
-                    await targetStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                    downloadedBytes += read;
-
-                    var ratio = totalBytes > 0 ? Math.Min(1.0, (double)downloadedBytes / totalBytes) : 0;
-                    progress?.Report(new SyncProgressInfo
-                    {
-                        Stage = "Скачиваем файл",
-                        CurrentFile = relativePath,
-                        ProcessedFiles = fileIndex,
-                        TotalFiles = totalFiles,
-                        Percent = CalculateSyncPercent(fileIndex, totalFiles, ratio),
-                        DetailMessage = totalBytes > 0 ? $"Скачано {FormatBytes(downloadedBytes)} из {FormatBytes(totalBytes)}" : $"Скачано {FormatBytes(downloadedBytes)}",
-                        LocalPath = localPath,
-                        SourceUrl = entry.Url,
-                        CurrentFileBytesDownloaded = downloadedBytes,
-                        CurrentFileBytesTotal = totalBytes
-                    });
-                }
-
+                await sourceStream.CopyToAsync(targetStream, 1024 * 64, cancellationToken);
                 await targetStream.FlushAsync(cancellationToken);
             }
 
@@ -891,13 +905,6 @@ public sealed class FileSyncService
 
     private static async Task SaveStateAsync(string stateFilePath, SyncState state, CancellationToken cancellationToken)
         => await File.WriteAllTextAsync(stateFilePath, JsonSerializer.Serialize(state, JsonOptions), cancellationToken);
-
-    private static double CalculateSyncPercent(int fileIndex, int totalFiles, double fileRatio)
-    {
-        if (totalFiles <= 0) return 0;
-        fileRatio = Math.Max(0, Math.Min(1, fileRatio));
-        return (((double)fileIndex / totalFiles) + (fileRatio / totalFiles)) * 85.0;
-    }
 
     private static string NormalizeRelativePath(string path) => path.Replace('\\', '/').Trim('/');
     private static bool IsProtectedFromDeletion(string relativePath)
