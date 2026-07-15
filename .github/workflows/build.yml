@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: CoreHost + renderer + electron
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install
+        run: npm ci
+
+      - name: Build CoreHost (.NET, Linux)
+        run: npm run build:core:dev:linux
+
+      - name: Build Electron main
+        run: npm run build:electron
+
+      - name: Build renderer (Vue)
+        run: npm run build:renderer
