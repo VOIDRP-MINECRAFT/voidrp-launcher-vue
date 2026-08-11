@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { useLauncherStore } from '../stores/launcher'
+import CrashModal from '../components/CrashModal.vue'
 
 const launcher = useLauncherStore()
 const route = useRoute()
@@ -350,6 +351,9 @@ watch(
       </main>
 
     </div>
+
+    <!-- Crash advice overlay — shows after a failed game session -->
+    <CrashModal />
   </div>
 </template>
 

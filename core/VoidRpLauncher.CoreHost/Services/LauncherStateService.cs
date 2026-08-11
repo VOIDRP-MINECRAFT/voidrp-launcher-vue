@@ -18,6 +18,7 @@ public sealed class LauncherStateService
     private LauncherProgressDto _progress = new();
     private LauncherAuthSnapshot? _snapshot;
     private LauncherDashboardResponseDto? _dashboard;
+    private LauncherCrashInfoDto? _lastCrash;
 
     public bool IsInitialized
     {
@@ -72,6 +73,22 @@ public sealed class LauncherStateService
         lock (_lock)
         {
             _progress = new LauncherProgressDto();
+        }
+    }
+
+    public void SetCrash(LauncherCrashInfoDto? crash)
+    {
+        lock (_lock)
+        {
+            _lastCrash = crash;
+        }
+    }
+
+    public void ClearCrash()
+    {
+        lock (_lock)
+        {
+            _lastCrash = null;
         }
     }
 
@@ -154,7 +171,8 @@ public sealed class LauncherStateService
                     LegacyHashPresent = _snapshot?.Security?.LegacyHashPresent ?? false,
                     LegacyReady = _snapshot?.Security?.LegacyReady ?? false
                 },
-                Dashboard = BuildDashboardDto(_dashboard)
+                Dashboard = BuildDashboardDto(_dashboard),
+                LastCrash = _lastCrash
             };
         }
     }

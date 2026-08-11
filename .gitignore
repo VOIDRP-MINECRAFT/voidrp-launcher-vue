@@ -159,3 +159,5 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+# Admin-triggered build/deploy runtime state (logs, status, notes, history)
+.launcher-job/

@@ -109,6 +109,28 @@ public sealed class LauncherStateDto
     public LauncherLinksDto Links { get; set; } = new();
     public LauncherAccountSecurityDto Security { get; set; } = new();
     public LauncherDashboardDto Dashboard { get; set; } = new();
+
+    /// <summary>
+    /// Populated when the last game session crashed and we have advice to show.
+    /// Null while the game is running fine or before any launch this session.
+    /// </summary>
+    public LauncherCrashInfoDto? LastCrash { get; set; }
+}
+
+/// <summary>
+/// Player-facing crash explanation: what happened and how to fix it.
+/// Produced by <see cref="Services.CrashAdvisor"/>.
+/// </summary>
+public sealed class LauncherCrashInfoDto
+{
+    public string Id { get; set; } = string.Empty;
+    public int ExitCode { get; set; }
+    public string ExitCodeHex { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Cause { get; set; } = string.Empty;
+    public string Solution { get; set; } = string.Empty;
+    public bool Recognized { get; set; }
+    public DateTimeOffset DetectedAt { get; set; }
 }
 
 public sealed class OperationResponseDto

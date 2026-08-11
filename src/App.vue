@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLauncherStore } from './stores/launcher'
 import ToastHost from './components/ToastHost.vue'
 import SplashScreen from './components/SplashScreen.vue'
+import UpdateScreen from './components/UpdateScreen.vue'
 
 const launcher = useLauncherStore()
 const router = useRouter()
 const route = useRoute()
+
+// The main process opens a dedicated window with ?boot=update during a startup
+// self-update. There we render ONLY the premium update screen (progress + release
+// notes) and never boot the full app — it relaunches automatically when done.
+const isUpdateMode = new URLSearchParams(window.location.search).get('boot') === 'update'
+const updaterStatus = ref<Record<string, unknown> | null>(null)
+let offUpdater: (() => void) | null = null
 
 // Prefer CoreHost's live download progress (real % + current file) during the
 // bootstrap phase; fall back to the coarse init steps when it's not reporting.
@@ -18,17 +26,25 @@ const splashProgress = computed(() => {
 const splashDetail = computed(() => (launcher.progress?.visible ? launcher.progress.details : ''))
 
 onMounted(() => {
+  const desktop = (window as unknown as { desktop?: { onUpdaterStatus?: (cb: (s: unknown) => void) => () => void } }).desktop
+  if (isUpdateMode) {
+    // Update window: just listen for progress/notes; don't boot the app.
+    offUpdater = desktop?.onUpdaterStatus?.((s) => { updaterStatus.value = s as Record<string, unknown> }) ?? null
+    return
+  }
   void launcher.initializeApp()
   void launcher.fetchServers()
 })
 
 onBeforeUnmount(() => {
-  launcher.dispose()
+  offUpdater?.()
+  if (!isUpdateMode) launcher.dispose()
 })
 
 watch(
   () => [launcher.isAuthenticated, route.path] as const,
   ([isAuthenticated, currentPath]) => {
+    if (isUpdateMode) return
     if (isAuthenticated) {
       if (currentPath === '/login') {
         router.replace('/home')
@@ -90,19 +106,24 @@ const themeVars = computed(() => {
     <div class="bg-noise"></div>
     <div class="vignette"></div>
 
-    <div class="relative z-10 h-screen w-full">
-      <RouterView />
-      <ToastHost />
-    </div>
+    <!-- Startup self-update: premium update window (progress + release notes) -->
+    <UpdateScreen v-if="isUpdateMode" :status="updaterStatus" />
 
-    <Transition name="splash">
-      <SplashScreen
-        v-if="!launcher.initialized"
-        :status-text="launcher.statusText"
-        :detail="splashDetail"
-        :progress="splashProgress"
-      />
-    </Transition>
+    <template v-else>
+      <div class="relative z-10 h-screen w-full">
+        <RouterView />
+        <ToastHost />
+      </div>
+
+      <Transition name="splash">
+        <SplashScreen
+          v-if="!launcher.initialized"
+          :status-text="launcher.statusText"
+          :detail="splashDetail"
+          :progress="splashProgress"
+        />
+      </Transition>
+    </template>
   </div>
 </template>
 

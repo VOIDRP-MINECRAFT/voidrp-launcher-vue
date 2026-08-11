@@ -86,6 +86,17 @@ interface BattlePassProfile {
   premium_expires_at: string | null
 }
 
+interface LauncherCrashInfo {
+  id: string
+  exitCode: number
+  exitCodeHex: string
+  title: string
+  cause: string
+  solution: string
+  recognized: boolean
+  detectedAt: string
+}
+
 interface LauncherState {
   initialized: boolean
   isBusy: boolean
@@ -106,6 +117,7 @@ interface LauncherState {
   links: LauncherLinks
   security: LauncherAccountSecurity
   dashboard: LauncherDashboard
+  lastCrash: LauncherCrashInfo | null
 }
 
 interface OperationResponse {
@@ -215,6 +227,7 @@ function defaultState(): LauncherState {
     links: defaultLinks(),
     security: defaultSecurity(),
     dashboard: defaultDashboard(),
+    lastCrash: null,
   }
 }
 function defaultSkin(): SkinState {
@@ -319,6 +332,7 @@ export const useLauncherStore = defineStore('launcher', () => {
   const serverStatus = ref<ServerStatus | null>(null)
   const serverList = ref<GameServer[]>([])
   const selectedSlug = ref<string | null>(null)
+  const dismissedCrashId = ref<string | null>(null)
   let pollHandle: number | null = null
   let bootstrapPromise: Promise<void> | null = null
   let serverStatusTimer: ReturnType<typeof setInterval> | null = null
@@ -334,6 +348,12 @@ export const useLauncherStore = defineStore('launcher', () => {
   function dismissToast(id: string) {
     const index = toasts.findIndex((item) => item.id === id)
     if (index >= 0) toasts.splice(index, 1)
+  }
+
+  // The crash lives in CoreHost state and is re-sent on every poll; remember the
+  // dismissed id so the modal stays closed until the next (differently-id'd) crash.
+  function dismissCrash() {
+    if (state.lastCrash) dismissedCrashId.value = state.lastCrash.id
   }
 
   function applyState(next: Partial<LauncherState> | null | undefined) {
@@ -363,6 +383,7 @@ export const useLauncherStore = defineStore('launcher', () => {
       recentActivity: Array.isArray(next.dashboard?.recentActivity) ? (next.dashboard?.recentActivity as any) : [],
       walletBalance: Number(next.dashboard?.walletBalance ?? 0),
     }
+    state.lastCrash = (next.lastCrash as any) ?? null
   }
 
   function applySkin(next: Partial<SkinState> | null | undefined) {
@@ -797,6 +818,9 @@ export const useLauncherStore = defineStore('launcher', () => {
     links: computed(() => state.links),
     security: computed(() => state.security),
     dashboard: computed(() => state.dashboard),
+    activeCrash: computed(() =>
+      state.lastCrash && state.lastCrash.id !== dismissedCrashId.value ? state.lastCrash : null),
+    dismissCrash,
     nation: computed(() => state.dashboard.nation),
     nationStats: computed(() => state.dashboard.nationStats),
     playerStats: computed(() => state.dashboard.playerStats),

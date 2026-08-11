@@ -244,6 +244,9 @@ public sealed class LauncherFacadeService
                 return OperationResponseDto.Failure(GetState(), "Лаунчер ещё не завершил инициализацию.");
             }
 
+            // Fresh attempt — drop any crash advice from a previous session so the
+            // modal doesn't linger while the game is starting up again.
+            _stateService.ClearCrash();
             _stateService.SetStatus("Проверяем клиент перед запуском...");
             _stateService.SetProgress("Java runtime", "Проверяем игровой Java runtime...", 0);
 
@@ -566,6 +569,8 @@ public sealed class LauncherFacadeService
             {
                 _diagnostics.Warn("Crash", $"Game exited with MCEF crash code {exitCode} (0xC0000409). Skipping crash report.");
                 _stateService.SetStatus("Minecraft завершился с ошибкой MCEF (код -1073740791). Попробуйте переустановить лаунчер или обратитесь в поддержку.");
+                // Still surface advice to the player even though we don't spam the backend.
+                _stateService.SetCrash(CrashAdvisor.Classify(exitCode, TryReadLogTail(48 * 1024), null));
                 return;
             }
 
@@ -577,6 +582,12 @@ public sealed class LauncherFacadeService
                 _diagnostics.Warn("Crash", $"Crash detected (exit={exitCode}). Sending report...");
                 var diag = BuildCrashDiagnostics(crashReportContent);
                 await _authSessionService.ReportCrashAsync(exitCode, diag, CancellationToken.None);
+
+                // Show the player what went wrong and how to fix it.
+                var advice = CrashAdvisor.Classify(exitCode, diag.LogTail, diag.CrashReport);
+                _stateService.SetCrash(advice);
+                if (advice != null)
+                    _stateService.SetStatus($"Игра завершилась с ошибкой: {advice.Title}");
             }
         }
         catch (Exception ex)

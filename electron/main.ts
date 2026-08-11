@@ -38,6 +38,8 @@ type UpdaterStatusPayload = {
   downloaded: boolean
   progressPercent: number
   message: string
+  notes?: string
+  version?: string
 }
 
 type LauncherUpdateArtifact = {
@@ -59,6 +61,7 @@ type LauncherUpdateManifest = {
 
 type PendingShellUpdate = {
   version: string
+  notes?: string
   launcher: LauncherUpdateArtifact
   updater: LauncherUpdateArtifact
 }
@@ -288,6 +291,7 @@ async function resolvePendingShellUpdate(): Promise<PendingShellUpdate | null> {
 
   return {
     version: manifest.version,
+    notes: manifest.notes,
     launcher: platformArtifacts.launcher,
     updater: platformArtifacts.updater
   }
@@ -314,7 +318,8 @@ async function installShellUpdate(update: PendingShellUpdate) {
       downloading: true,
       downloaded: false,
       progressPercent: 10,
-      message: `Найдена новая версия ${update.version}. Скачиваем обновление лаунчера...`
+      message: `Найдена новая версия ${update.version}. Скачиваем обновление лаунчера...`,
+      notes: update.notes
     })
 
     await downloadToFile(update.launcher.url, launcherDownloadPath)
@@ -406,6 +411,18 @@ async function runStartupAutoUpdate(): Promise<boolean> {
     }
 
     pendingShellUpdate = resolved
+    // Seed the status (incl. release notes) so the premium update window shows
+    // "what's new" the instant it finishes loading, then open it and download.
+    emitUpdaterStatus({
+      available: true,
+      downloading: true,
+      downloaded: false,
+      progressPercent: 5,
+      message: `Найдена новая версия ${resolved.version}. Готовим обновление…`,
+      notes: resolved.notes,
+      version: resolved.version
+    })
+    createWindow(true)
     await installShellUpdate(resolved)
     return true
   } catch (error) {
@@ -421,13 +438,17 @@ async function runStartupAutoUpdate(): Promise<boolean> {
   }
 }
 
-function createWindow() {
+function createWindow(updateMode = false) {
   const iconPath = resolveWindowIcon()
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 1180,
-    minHeight: 760,
+    width: updateMode ? 620 : 1280,
+    height: updateMode ? 720 : 860,
+    minWidth: updateMode ? 620 : 1180,
+    minHeight: updateMode ? 720 : 760,
+    resizable: !updateMode,
+    maximizable: !updateMode,
+    center: true,
+    frame: !updateMode,
     autoHideMenuBar: true,
     backgroundColor: '#050608',
     ...(iconPath ? { icon: iconPath } : {}),
@@ -440,10 +461,13 @@ function createWindow() {
     }
   })
 
+  // Update-mode window renders a dedicated premium updater screen (boot=update)
+  // instead of booting the full app — see App.vue / UpdateScreen.vue.
+  const query = updateMode ? { search: 'boot=update' } : undefined
   if (app.isPackaged) {
-    void mainWindow.loadFile(resolveRendererIndexPath())
+    void mainWindow.loadFile(resolveRendererIndexPath(), query)
   } else {
-    void mainWindow.loadURL('http://127.0.0.1:5177')
+    void mainWindow.loadURL(`http://127.0.0.1:5177/${updateMode ? '?boot=update' : ''}`)
   }
 
   mainWindow.webContents.on('did-finish-load', () => {
