@@ -175,11 +175,21 @@ public sealed class LauncherAccountApiClient
         }
     }
 
-    public async Task ReportCrashAsync(string accessToken, int exitCode, string? crashReport, CancellationToken cancellationToken = default)
+    public async Task ReportCrashAsync(string accessToken, int exitCode, CrashDiagnostics diag, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "launcher/me/crash-report");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-        request.Content = JsonContent.Create(new { exit_code = exitCode, crash_report = crashReport }, options: JsonOptions);
+        request.Content = JsonContent.Create(new
+        {
+            exit_code = exitCode,
+            crash_report = diag.CrashReport,
+            log_tail = diag.LogTail,
+            launcher_version = diag.LauncherVersion,
+            os_name = diag.OsName,
+            java_version = diag.JavaVersion,
+            ram_mb = diag.RamMb,
+            server_slug = diag.ServerSlug,
+        }, options: JsonOptions);
         try { using var response = await _httpClient.SendAsync(request, cancellationToken); }
         catch { }
     }
@@ -503,10 +513,10 @@ public sealed class LauncherAuthSessionService
         await _apiClient.SaveConfigFileAsync(_snapshot.AccessToken, path, contentB64, cancellationToken);
     }
 
-    public async Task ReportCrashAsync(int exitCode, string? crashReport, CancellationToken cancellationToken = default)
+    public async Task ReportCrashAsync(int exitCode, CrashDiagnostics diag, CancellationToken cancellationToken = default)
     {
         if (_snapshot is null || string.IsNullOrWhiteSpace(_snapshot.AccessToken)) return;
-        try { await _apiClient.ReportCrashAsync(_snapshot.AccessToken, exitCode, crashReport, cancellationToken); }
+        try { await _apiClient.ReportCrashAsync(_snapshot.AccessToken, exitCode, diag, cancellationToken); }
         catch { }
     }
 

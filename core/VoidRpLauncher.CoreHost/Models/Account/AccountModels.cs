@@ -3,6 +3,20 @@ using System.Text.Json.Serialization;
 
 namespace VoidRpLauncher.CoreHost.Models.Account;
 
+/// <summary>
+/// Diagnostics gathered when the game crashes, sent to the backend so an admin
+/// can see what actually failed (the log tail) plus the environment, not just an
+/// opaque exit code.
+/// </summary>
+public sealed record CrashDiagnostics(
+    string? CrashReport,
+    string? LogTail,
+    string? LauncherVersion,
+    string? OsName,
+    string? JavaVersion,
+    int? RamMb,
+    string? ServerSlug);
+
 public sealed class LoginRequestDto
 {
     [JsonPropertyName("login")] public string Login { get; set; } = string.Empty;

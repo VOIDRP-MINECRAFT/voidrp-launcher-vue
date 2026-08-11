@@ -575,7 +575,8 @@ public sealed class LauncherFacadeService
             if (isCrash)
             {
                 _diagnostics.Warn("Crash", $"Crash detected (exit={exitCode}). Sending report...");
-                await _authSessionService.ReportCrashAsync(exitCode, crashReportContent, CancellationToken.None);
+                var diag = BuildCrashDiagnostics(crashReportContent);
+                await _authSessionService.ReportCrashAsync(exitCode, diag, CancellationToken.None);
             }
         }
         catch (Exception ex)
@@ -608,6 +609,64 @@ public sealed class LauncherFacadeService
         {
             return null;
         }
+    }
+
+    // Assemble everything an admin needs to diagnose a crash from the report:
+    // the actual failure (crash-report file if written, else the log tail) plus
+    // the environment. Each piece is independently best-effort so one failure
+    // never blocks the rest.
+    private CrashDiagnostics BuildCrashDiagnostics(string? crashReportContent)
+    {
+        string? logTail = null, javaVersion = null, launcherVersion = null, os = null, serverSlug = null;
+        int? ramMb = null;
+        try { logTail = TryReadLogTail(48 * 1024); } catch { }
+        try { javaVersion = ResolveJavaVersion(); } catch { }
+        try { launcherVersion = _appVersionService.CurrentVersion; } catch { }
+        try { os = System.Runtime.InteropServices.RuntimeInformation.OSDescription; } catch { }
+        try { ramMb = _settingsService.Load().MaxRamMb; } catch { }
+        try { serverSlug = _serverCatalog.GetSelectedSlug(); } catch { }
+        return new CrashDiagnostics(crashReportContent, logTail, launcherVersion, os, javaVersion, ramMb, serverSlug);
+    }
+
+    // The tail of logs/latest.log — usually present even when no crash-report
+    // file was written (OOM, hard native crash), and it holds the real stack.
+    private string? TryReadLogTail(int maxBytes)
+    {
+        var logPath = System.IO.Path.Combine(_pathsService.GameDirectory, "logs", "latest.log");
+        if (!File.Exists(logPath)) return null;
+
+        // Read only the tail; open shared since the JVM may still hold the handle.
+        using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var start = Math.Max(0, fs.Length - maxBytes);
+        fs.Seek(start, SeekOrigin.Begin);
+        using var reader = new StreamReader(fs);
+        var text = reader.ReadToEnd();
+        if (start > 0)
+        {
+            var nl = text.IndexOf('\n');
+            if (nl >= 0 && nl < text.Length - 1) text = text[(nl + 1)..];  // drop partial first line
+            text = "... [лог обрезан, показан хвост]\n" + text;
+        }
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    // Read JAVA_VERSION from the JDK/JRE `release` file next to the java home.
+    private string? ResolveJavaVersion()
+    {
+        var javaExe = _pathsService.ResolveJavaExecutablePath();
+        if (string.IsNullOrWhiteSpace(javaExe)) return null;
+        // .../java/bin/java(.exe) → java home is two levels up.
+        var binDir = System.IO.Path.GetDirectoryName(javaExe);
+        var javaHome = binDir is null ? null : System.IO.Path.GetDirectoryName(binDir);
+        if (javaHome is null) return null;
+        var releaseFile = System.IO.Path.Combine(javaHome, "release");
+        if (!File.Exists(releaseFile)) return null;
+        foreach (var line in File.ReadAllLines(releaseFile))
+        {
+            if (line.StartsWith("JAVA_VERSION", StringComparison.OrdinalIgnoreCase))
+                return line.Split('=', 2)[^1].Trim().Trim('"');
+        }
+        return null;
     }
 
     private void KillLingeringCefProcesses()
