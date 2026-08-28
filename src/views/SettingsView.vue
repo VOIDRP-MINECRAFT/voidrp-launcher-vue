@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useLauncherStore } from '../stores/launcher'
+import { LAUNCHER_THEMES } from '../theme/themes'
 
 const launcher = useLauncherStore()
+const themes = LAUNCHER_THEMES
 const memoryMb = ref(launcher.currentMemoryMb)
 
 watch(() => launcher.currentMemoryMb, (v) => { memoryMb.value = v }, { immediate: true })
@@ -37,6 +39,40 @@ const folderActions = [
       <p class="text-[11px] uppercase tracking-[0.25em] text-violet-300/70">Настройки</p>
       <h2 class="mt-1.5 text-2xl font-semibold">Параметры лаунчера</h2>
     </div>
+
+    <!-- Theme -->
+    <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
+      <p class="text-sm font-semibold">Тема оформления</p>
+      <p class="mt-1 text-xs text-white/45">Цвет акцента и фон интерфейса. Применяется сразу.</p>
+
+      <div class="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <button
+          v-for="t in themes"
+          :key="t.id"
+          class="flex items-center gap-3 rounded-[14px] border p-3 text-left transition"
+          :class="launcher.themeId === t.id
+            ? 'bg-white/[0.06]'
+            : 'border-white/8 bg-white/[0.02] hover:bg-white/[0.05]'"
+          :style="launcher.themeId === t.id ? { borderColor: 'var(--acc)' } : {}"
+          @click="launcher.setTheme(t.id)"
+        >
+          <span
+            class="h-8 w-8 shrink-0 rounded-full ring-2 ring-white/10"
+            :style="{ backgroundImage: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }"
+          ></span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-sm font-medium text-white/85">{{ t.name }}</span>
+            <span class="block text-[10px] text-white/40">{{ launcher.themeId === t.id ? 'Выбрана' : 'Нажмите' }}</span>
+          </span>
+          <svg
+            v-if="launcher.themeId === t.id"
+            class="h-4 w-4 shrink-0"
+            :style="{ color: 'var(--acc-soft)' }"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"
+          ><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+        </button>
+      </div>
+    </section>
 
     <!-- Memory -->
     <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">

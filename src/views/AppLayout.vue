@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { useLauncherStore } from '../stores/launcher'
 import CrashModal from '../components/CrashModal.vue'
+import ThemePicker from '../components/ThemePicker.vue'
 
 const launcher = useLauncherStore()
 const route = useRoute()
@@ -224,6 +225,8 @@ watch(
 
         <!-- Actions -->
         <div class="flex shrink-0 items-center gap-2">
+          <ThemePicker />
+
           <button
             class="btn-glass rounded-[14px] px-3.5 py-2 text-sm text-white/60 hover:text-white"
             @click="launcher.logout()"
@@ -402,4 +405,12 @@ watch(
   color: var(--acc-soft);
   filter: drop-shadow(0 0 6px rgba(var(--acc-rgb), 0.6));
 }
+
+/* Светлая тема: навигация красится хардкод-белым (не через .text-white),
+   поэтому инвертируем её здесь — иначе меню белое на светлом = невидимо. */
+[data-mode="light"] .nav-item { color: rgba(15, 23, 42, 0.55); }
+[data-mode="light"] .nav-item:hover { color: rgba(15, 23, 42, 0.92); background: rgba(15, 23, 42, 0.05); }
+[data-mode="light"] .nav-item__icon { color: rgba(15, 23, 42, 0.42); }
+[data-mode="light"] .nav-item:hover .nav-item__icon { color: rgba(15, 23, 42, 0.7); }
+[data-mode="light"] .nav-item--active { color: rgba(15, 23, 42, 0.95); }
 </style>

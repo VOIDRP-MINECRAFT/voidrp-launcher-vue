@@ -28,6 +28,15 @@ public sealed class ServerCatalogService
     private string? _selectedSlug;
     private bool _selectionLoaded;
 
+    /// <summary>
+    /// Supplies the signed-in player's access token (wired in Program.cs from
+    /// <c>LauncherAuthSessionService</c>). The catalogue endpoint uses optional
+    /// auth: with a token, servers flagged "только для админов" (staff_only)
+    /// are included for admins and staff holding <c>servers.hidden.view</c>;
+    /// without one the backend simply returns the public list.
+    /// </summary>
+    public Func<string?>? AccessTokenProvider { get; set; }
+
     public ServerCatalogService(
         AppEndpointsOptions endpoints,
         LauncherPathsService paths,
@@ -73,11 +82,21 @@ public sealed class ServerCatalogService
 
         try
         {
-            var body = await _http.GetStringAsync(_endpoints.ServerListUrl, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Get, _endpoints.ServerListUrl);
+            var token = AccessTokenProvider?.Invoke();
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+            }
+
+            using var response = await _http.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             var list = JsonSerializer.Deserialize<List<GameServerDto>>(body, JsonOptions);
             if (list is not null)
             {
                 _cache = list;
+                DropSelectionIfMissing();
             }
         }
         catch (Exception ex)
@@ -89,6 +108,32 @@ public sealed class ServerCatalogService
         // is known, make the on-disk paths reflect the active server.
         ApplyActiveServerToPaths();
         return _cache;
+    }
+
+    /// <summary>
+    /// Forgets a saved selection that the freshly-fetched catalogue no longer
+    /// contains — e.g. a staff-only server picked by an admin who then signed
+    /// out. Without this the launcher would keep syncing into that server's
+    /// directory using the fallback manifest.
+    /// </summary>
+    private void DropSelectionIfMissing()
+    {
+        EnsureSelectionLoaded();
+        if (string.IsNullOrWhiteSpace(_selectedSlug) || _cache.Count == 0)
+        {
+            return;
+        }
+
+        if (_cache.Any(s => string.Equals(s.Slug, _selectedSlug, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var fallback = _cache.FirstOrDefault(s => s.IsDefault) ?? _cache[0];
+        _diagnostics.Warn(
+            "ServerCatalog",
+            $"Server '{_selectedSlug}' is no longer available for this account; switching to '{fallback.Slug}'.");
+        SelectServer(fallback.Slug);
     }
 
     /// <summary>
@@ -249,6 +294,9 @@ public sealed class GameServerDto
     public string WhitelistMode { get; set; } = "public";
     public bool Maintenance { get; set; }
     public bool IsDefault { get; set; }
+    /// <summary>Server visible only to staff — the backend already filtered it
+    /// out for everyone else, so a true value just drives the "🔒" badge.</summary>
+    public bool StaffOnly { get; set; }
     public string? MapUrl { get; set; }
     public string? AccentColor { get; set; }
     public Dictionary<string, bool>? Features { get; set; }

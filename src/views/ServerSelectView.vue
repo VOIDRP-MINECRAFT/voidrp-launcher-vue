@@ -123,6 +123,10 @@ function goHome() {
               <span v-if="s.slug === launcher.selectedSlug" class="shrink-0 rounded-md bg-white/8 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white/50">
                 текущий
               </span>
+              <!-- Сервер в каталоге только у персонала — обычным игрокам его не отдаёт бэкенд. -->
+              <span v-if="s.staffOnly" class="shrink-0 rounded-md bg-amber-400/12 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300" title="Виден только админам и модераторам с правом «Скрытые серверы»">
+                🔒 только админы
+              </span>
             </div>
             <p class="mt-0.5 line-clamp-1 text-xs text-white/45">
               {{ s.description || `${s.host}${s.port !== 25565 ? ':' + s.port : ''}` }}

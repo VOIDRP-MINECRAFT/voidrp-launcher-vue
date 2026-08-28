@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { DEFAULT_THEME_ID, loadThemeId, saveThemeId } from '../theme/themes'
 
 type ToastTone = 'success' | 'warning' | 'error' | 'info'
 
@@ -316,6 +317,7 @@ export interface GameServer {
   whitelistMode: string
   maintenance: boolean
   isDefault: boolean
+  staffOnly?: boolean
   mapUrl?: string | null
   accentColor?: string | null
   features?: Record<string, boolean> | null
@@ -330,6 +332,8 @@ export const useLauncherStore = defineStore('launcher', () => {
   const bpProfile = ref<BattlePassProfile | null>(null)
   const initProgress = ref(0)
   const serverStatus = ref<ServerStatus | null>(null)
+  // Selected visual theme (client-only preference, persisted to localStorage).
+  const themeId = ref<string>(loadThemeId() || DEFAULT_THEME_ID)
   const serverList = ref<GameServer[]>([])
   const selectedSlug = ref<string | null>(null)
   const dismissedCrashId = ref<string | null>(null)
@@ -551,8 +555,22 @@ export const useLauncherStore = defineStore('launcher', () => {
   }
 
   function startServerStatusPolling() {
-    fetchServerStatus()
-    serverStatusTimer = setInterval(fetchServerStatus, 60_000)
+    // The play screen reads live status from activeServer.status, which comes from
+    // the per-server catalogue (serverList / fetchServers), NOT the legacy single
+    // -server serverStatus ref. So poll fetchServers to keep online/players/
+    // maintenance fresh — otherwise the status stays frozen at whatever it was on
+    // bootstrap (server up but launcher shows offline & blocks Play, or vice
+    // versa). CoreHost re-fetches the backend each call and the backend caches
+    // mcstatus ~30s, so a 30s poll is fresh without hammering anything.
+    void fetchServers()
+    serverStatusTimer = setInterval(() => { void fetchServers() }, 30_000)
+    // Refresh immediately when the user tabs back (e.g. after starting/stopping
+    // the server outside the launcher) so they don't wait out the poll interval.
+    window.addEventListener('focus', onWindowFocus)
+  }
+
+  function onWindowFocus() {
+    void fetchServers()
   }
 
   function stopServerStatusPolling() {
@@ -560,11 +578,17 @@ export const useLauncherStore = defineStore('launcher', () => {
       clearInterval(serverStatusTimer)
       serverStatusTimer = null
     }
+    window.removeEventListener('focus', onWindowFocus)
   }
 
   function dispose() {
     stopPolling()
     stopServerStatusPolling()
+  }
+
+  function setTheme(id: string) {
+    themeId.value = id
+    saveThemeId(id)
   }
 
   async function login(login: string, password: string) {
@@ -577,6 +601,9 @@ export const useLauncherStore = defineStore('launcher', () => {
       applyState(response.state)
       pushToast(response.ok ? 'success' : 'error', response.ok ? 'Вход выполнен' : 'Ошибка входа', normalizeMessage(response.message) || '')
       if (response.ok) {
+        // Каталог зависит от аккаунта: серверы «только для админов» видны
+        // лишь админам и модераторам с правом servers.hidden.view.
+        void fetchServers()
         try {
           applySkin(await readJson<SkinState>('/api/skin'))
         } catch {
@@ -597,6 +624,8 @@ export const useLauncherStore = defineStore('launcher', () => {
       const response = await readJson<OperationResponse>('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       applyState(response.state)
       applySkin(defaultSkin())
+      // Убираем из каталога серверы, которые были видны только под аккаунтом.
+      void fetchServers()
       pushToast('success', 'Сессия завершена', normalizeMessage(response.message) || 'Вы вышли из аккаунта.')
       return response
     } catch (error: unknown) {
@@ -850,6 +879,8 @@ export const useLauncherStore = defineStore('launcher', () => {
     checkShellUpdates,
     installShellUpdate,
     openPath,
+    themeId: computed(() => themeId.value),
+    setTheme,
     mods: computed(() => mods),
     getMods,
     toggleMod,

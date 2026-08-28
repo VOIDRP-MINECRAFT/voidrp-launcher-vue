@@ -75,6 +75,16 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 app.UseCors();
 
+// Fetch the server catalogue as the signed-in player: staff-only servers come
+// back only for admins and moderators holding `servers.hidden.view`. Resolved
+// eagerly (both are singletons) so /api/servers is authenticated even when it
+// is the very first call the renderer makes.
+{
+    var catalog = app.Services.GetRequiredService<ServerCatalogService>();
+    var authSession = app.Services.GetRequiredService<LauncherAuthSessionService>();
+    catalog.AccessTokenProvider = () => authSession.Snapshot?.AccessToken;
+}
+
 app.MapGet("/health", () => Results.Ok(new { ok = true }));
 
 app.MapGet("/api/bootstrap", async (LauncherFacadeService facade) =>

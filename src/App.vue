@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLauncherStore } from './stores/launcher'
+import { getTheme } from './theme/themes'
 import ToastHost from './components/ToastHost.vue'
 import SplashScreen from './components/SplashScreen.vue'
 import UpdateScreen from './components/UpdateScreen.vue'
@@ -32,8 +33,9 @@ onMounted(() => {
     offUpdater = desktop?.onUpdaterStatus?.((s) => { updaterStatus.value = s as Record<string, unknown> }) ?? null
     return
   }
+  // initializeApp сам тянет каталог серверов — но уже ПОСЛЕ восстановления
+  // сессии, чтобы запрос ушёл с токеном и админ увидел скрытые серверы.
   void launcher.initializeApp()
-  void launcher.fetchServers()
 })
 
 onBeforeUnmount(() => {
@@ -75,7 +77,9 @@ function mixRgb(a: number[], b: number[], t: number) {
   return a.map((v, i) => Math.round(v + (b[i] - v) * t))
 }
 
-const themeVars = computed(() => {
+// Accent derived from the active server's accent_color — used only by the
+// "По серверу" theme so per-server branding still works.
+function serverAccentVars(): Record<string, string> {
   const active = launcher.serverList.find((s) => s.slug === launcher.selectedSlug)
   const base = parseHex(active?.accentColor || ACCENT_FALLBACK)
   const second = mixRgb(base, [30, 20, 90], 0.3) // глубже и чуть синее — второй стоп градиентов
@@ -92,6 +96,26 @@ const themeVars = computed(() => {
     '--acc-2-rgb': rgb(second),
     '--acc-soft-rgb': rgb(soft),
   }
+}
+
+// Full CSS-var set for the selected theme (surface + accent). The "server" theme
+// keeps its accent dynamic; the fixed themes carry their own accent.
+const themeVars = computed<Record<string, string>>(() => {
+  const theme = getTheme(launcher.themeId)
+  const vars = { ...theme.vars }
+  if (theme.followsServerAccent) Object.assign(vars, serverAccentVars())
+  return vars
+})
+
+// Apply to :root so everything (background, panels, scrollbar, ::selection —
+// which read the vars at :root) follows the theme, not just this subtree.
+watchEffect(() => {
+  const root = document.documentElement
+  for (const [key, value] of Object.entries(themeVars.value)) {
+    root.style.setProperty(key, value)
+  }
+  // data-mode drives the light-theme utility overrides in main.css.
+  root.dataset.mode = getTheme(launcher.themeId).mode ?? 'dark'
 })
 </script>
 
