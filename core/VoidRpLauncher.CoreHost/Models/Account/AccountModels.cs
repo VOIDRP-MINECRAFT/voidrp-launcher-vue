@@ -15,7 +15,9 @@ public sealed record CrashDiagnostics(
     string? OsName,
     string? JavaVersion,
     int? RamMb,
-    string? ServerSlug);
+    string? ServerSlug,
+    // Key of the crash rule that recognized this crash (null = unrecognized), so the admin sees coverage.
+    string? AdviceRuleKey = null);
 
 public sealed class LoginRequestDto
 {

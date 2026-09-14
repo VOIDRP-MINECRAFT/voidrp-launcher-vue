@@ -113,6 +113,20 @@ public sealed class LauncherAccountApiClient
         return await ReadJsonAsync<PlayerSkinOperationResponseDto>(response, cancellationToken);
     }
 
+    private static readonly JsonSerializerOptions SnakeCaseJson = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>Public, server-scoped (X-Server-Slug via the handler) crash rules + launcher hints.</summary>
+    public async Task<CrashRulesPayload> GetCrashRulesAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _httpClient.GetAsync("launcher/crash-rules", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CrashRulesPayload>(SnakeCaseJson, cancellationToken) ?? new CrashRulesPayload();
+    }
+
     public async Task<LauncherPreferencesDto> GetPreferencesAsync(string accessToken, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, "launcher/me/prefs");
@@ -189,6 +203,7 @@ public sealed class LauncherAccountApiClient
             java_version = diag.JavaVersion,
             ram_mb = diag.RamMb,
             server_slug = diag.ServerSlug,
+            advice_rule_key = diag.AdviceRuleKey,
         }, options: JsonOptions);
         try { using var response = await _httpClient.SendAsync(request, cancellationToken); }
         catch { }

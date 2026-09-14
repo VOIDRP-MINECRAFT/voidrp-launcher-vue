@@ -62,6 +62,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp => new LauncherTokenStore(sp.GetRequiredService<LauncherPathsService>().StateDirectory));
 builder.Services.AddSingleton(sp => new LauncherPlayTicketStore(sp.GetRequiredService<LauncherPathsService>().StateDirectory));
 builder.Services.AddSingleton<LauncherAuthSessionService>();
+builder.Services.AddSingleton<CrashRuleService>();
 builder.Services.AddSingleton<AuthenticatedLaunchService>();
 builder.Services.AddSingleton<LauncherFacadeService>();
 

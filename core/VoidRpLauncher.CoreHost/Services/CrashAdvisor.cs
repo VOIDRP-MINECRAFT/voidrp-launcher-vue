@@ -211,7 +211,8 @@ public static class CrashAdvisor
     public static List<CrashRule> EffectiveRules(IReadOnlyList<CrashRule>? remoteRules)
     {
         var remote = (remoteRules ?? Array.Empty<CrashRule>())
-            .Where(r => !string.IsNullOrWhiteSpace(r.Key))
+            .Where(r => r is not null && !string.IsNullOrWhiteSpace(r.Key))
+            .Select(Sanitize)
             .GroupBy(r => r.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Last(), StringComparer.OrdinalIgnoreCase);
 
@@ -223,6 +224,24 @@ public static class CrashAdvisor
 
         // Stable sort: equal priorities keep built-ins first.
         return merged.Select((r, i) => (r, i)).OrderByDescending(x => x.r.Priority).ThenBy(x => x.i).Select(x => x.r).ToList();
+    }
+
+    // JSON from the server may carry nulls where the model expects empty lists/strings.
+    private static CrashRule Sanitize(CrashRule rule)
+    {
+        rule.PatternsAll = (rule.PatternsAll ?? new()).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        rule.PatternsAny = (rule.PatternsAny ?? new()).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        rule.ExitCodes ??= new();
+        rule.Title ??= string.Empty;
+        rule.Cause ??= string.Empty;
+        rule.Solution ??= string.Empty;
+        rule.Actions = (rule.Actions ?? new()).Where(a => a is not null).ToList();
+        foreach (var action in rule.Actions)
+        {
+            action.Label ??= string.Empty;
+            action.Paths ??= new();
+        }
+        return rule;
     }
 
     /// <summary>

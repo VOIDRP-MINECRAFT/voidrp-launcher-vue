@@ -34,6 +34,7 @@ public sealed class LauncherFacadeService
     private readonly AppVersionService _appVersionService;
     private readonly ServerCatalogService _serverCatalog;
     private readonly CrashHistoryService _crashHistory;
+    private readonly CrashRuleService _crashRules;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private LauncherManifest? _cachedManifest;
 
@@ -51,9 +52,11 @@ public sealed class LauncherFacadeService
         DiagnosticsService diagnostics,
         AppVersionService appVersionService,
         ServerCatalogService serverCatalog,
-        CrashHistoryService crashHistory)
+        CrashHistoryService crashHistory,
+        CrashRuleService crashRules)
     {
         _crashHistory = crashHistory;
+        _crashRules = crashRules;
         _endpoints = endpoints;
         _serverCatalog = serverCatalog;
         _manifestService = manifestService;
@@ -82,6 +85,7 @@ public sealed class LauncherFacadeService
 
             _pathsService.EnsureBaseDirectories();
             _diagnostics.Info("Core", "Launcher core bootstrap started.");
+            _ = _crashRules.RefreshAsync(CancellationToken.None);
             _stateService.SetStatus("Подготавливаем окружение...");
             _stateService.SetProgress("Java runtime", "Проверяем игровой Java runtime...", 0);
 
@@ -261,6 +265,9 @@ public sealed class LauncherFacadeService
                 }, cancellationToken);
 
                 _stateService.SetProgress("Подготовка", "Загружаем pack manifest...", 0);
+
+                // Fresh crash rules for this session's advice; never blocks the launch.
+                _ = _crashRules.RefreshAsync(CancellationToken.None);
 
                 var manifest = await _manifestService.LoadAsync(_serverCatalog.ResolveManifestUrl(), cancellationToken);
                 _cachedManifest = manifest;
@@ -640,8 +647,8 @@ public sealed class LauncherFacadeService
             _diagnostics.Warn("Crash", $"Crash detected (exit={exitCode}). Sending report...");
             var diag = BuildCrashDiagnostics(crashReportContent);
             // Show the player what went wrong and how to fix it.
-            AdviseCrash(exitCode, diag.LogTail, diag.CrashReport);
-            await _authSessionService.ReportCrashAsync(exitCode, diag, CancellationToken.None);
+            var advice = AdviseCrash(exitCode, diag.LogTail, diag.CrashReport);
+            await _authSessionService.ReportCrashAsync(exitCode, diag with { AdviceRuleKey = advice.RuleKey }, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -651,7 +658,7 @@ public sealed class LauncherFacadeService
 
     private LauncherCrashInfoDto AdviseCrash(int exitCode, string? logTail, string? crashReport)
     {
-        var advice = CrashAdvisor.Classify(exitCode, logTail, crashReport, CrashAdvisor.EffectiveRules(null));
+        var advice = CrashAdvisor.Classify(exitCode, logTail, crashReport, _crashRules.EffectiveRules());
         CrashAdvisor.ApplyRepeat(advice, _crashHistory.Record(advice.RuleKey, advice.Title));
         _stateService.SetCrash(advice);
         _stateService.SetStatus($"Игра завершилась с ошибкой: {advice.Title}");
