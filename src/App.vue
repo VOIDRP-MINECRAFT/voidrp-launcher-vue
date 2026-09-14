@@ -4,6 +4,8 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useLauncherStore } from './stores/launcher'
 import { getTheme } from './theme/themes'
 import ToastHost from './components/ToastHost.vue'
+import CrashModal from './components/CrashModal.vue'
+import PreflightModal from './components/PreflightModal.vue'
 import SplashScreen from './components/SplashScreen.vue'
 import UpdateScreen from './components/UpdateScreen.vue'
 
@@ -136,6 +138,8 @@ watchEffect(() => {
     <template v-else>
       <div class="relative z-10 h-screen w-full">
         <RouterView />
+        <PreflightModal v-if="launcher.isAuthenticated" />
+        <CrashModal v-if="launcher.isAuthenticated" />
         <ToastHost />
       </div>
 

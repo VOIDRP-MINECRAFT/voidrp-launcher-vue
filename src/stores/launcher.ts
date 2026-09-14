@@ -87,7 +87,16 @@ interface BattlePassProfile {
   premium_expires_at: string | null
 }
 
-interface LauncherCrashInfo {
+export interface CrashAction {
+  index: number
+  // fix_files | reset_config | reset_all_configs | repair  → executed by CoreHost
+  // open_settings | relaunch | copy_report | show_crash    → handled in the renderer
+  type: string
+  label: string
+  paths: string[]
+}
+
+export interface LauncherCrashInfo {
   id: string
   exitCode: number
   exitCodeHex: string
@@ -96,6 +105,30 @@ interface LauncherCrashInfo {
   solution: string
   recognized: boolean
   detectedAt: string
+  ruleKey?: string | null
+  repeatCount: number
+  actions: CrashAction[]
+}
+
+export interface PreflightWarning {
+  id: string
+  severity: 'critical' | 'warning' | 'info'
+  title: string
+  message: string
+  actions: CrashAction[]
+}
+
+export const SERVER_SIDE_CRASH_ACTIONS = new Set(['fix_files', 'reset_config', 'reset_all_configs', 'repair'])
+
+const PREFLIGHT_MUTED_KEY = 'voidrp_preflight_muted_v1'
+
+function loadMutedPreflight(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PREFLIGHT_MUTED_KEY)
+    return new Set(Array.isArray(JSON.parse(raw || '[]')) ? JSON.parse(raw || '[]') : [])
+  } catch {
+    return new Set()
+  }
 }
 
 interface LauncherState {
@@ -660,6 +693,73 @@ export const useLauncherStore = defineStore('launcher', () => {
     }
   }
 
+  // ── Pre-launch check ────────────────────────────────────────────────────
+  // "Play" first asks CoreHost for warnings (memory, disk, unresolved crash). If any are
+  // left after the player's mutes, a modal shows them; the player can fix or launch anyway.
+  const preflightWarnings = ref<PreflightWarning[]>([])
+  const preflightOpen = ref(false)
+
+  async function requestPlay() {
+    if (state.isBusy) return null
+    let warnings: PreflightWarning[] = []
+    try {
+      const result = await readJson<{ warnings: PreflightWarning[] }>('/api/preflight')
+      const muted = loadMutedPreflight()
+      // Critical warnings can't be muted: they predict a crash, not an inconvenience.
+      warnings = (result.warnings || []).filter((w) => w.severity === 'critical' || !muted.has(w.id))
+    } catch {
+      // a failed check must never block playing
+    }
+    if (warnings.length > 0) {
+      preflightWarnings.value = warnings
+      preflightOpen.value = true
+      return null
+    }
+    return play()
+  }
+
+  function closePreflight() {
+    preflightOpen.value = false
+  }
+
+  async function playDespitePreflight(muteShown: boolean) {
+    if (muteShown) {
+      const muted = loadMutedPreflight()
+      preflightWarnings.value.filter((w) => w.severity !== 'critical').forEach((w) => muted.add(w.id))
+      try { localStorage.setItem(PREFLIGHT_MUTED_KEY, JSON.stringify([...muted])) } catch { /* storage unavailable */ }
+    }
+    preflightOpen.value = false
+    return play()
+  }
+
+  // ── Crash advice actions ────────────────────────────────────────────────
+  async function runCrashAction(crashId: string, actionIndex: number) {
+    try {
+      const response = await readJson<OperationResponse>('/api/crash/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ crashId, actionIndex }),
+      })
+      applyState(response.state)
+      pushToast(response.ok ? 'success' : 'error', response.ok ? 'Готово' : 'Не получилось', normalizeMessage(response.message) || '')
+      return response
+    } catch (error: unknown) {
+      pushToast('error', 'Не получилось', sanitizeError(error) || 'Не удалось выполнить исправление.')
+      return null
+    }
+  }
+
+  async function restoreCrash() {
+    try {
+      const response = await readJson<OperationResponse>('/api/crash/restore', { method: 'POST' })
+      applyState(response.state)
+      if (!response.ok) pushToast('info', 'Подсказка недоступна', normalizeMessage(response.message) || '')
+      return response
+    } catch {
+      return null
+    }
+  }
+
   async function repair() {
     try {
       const response = await readJson<OperationResponse>('/api/actions/repair', { method: 'POST' })
@@ -867,6 +967,13 @@ export const useLauncherStore = defineStore('launcher', () => {
     logout,
     revokeOtherSessions,
     play,
+    requestPlay,
+    preflightWarnings,
+    preflightOpen,
+    closePreflight,
+    playDespitePreflight,
+    runCrashAction,
+    restoreCrash,
     repair,
     clearDiagnostics,
     uploadSkin,

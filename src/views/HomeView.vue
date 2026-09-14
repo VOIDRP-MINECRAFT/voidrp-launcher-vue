@@ -137,7 +137,7 @@ function selectServer(slug: string) {
         <button
           class="btn-acc flex items-center gap-2.5 rounded-[16px] px-8 py-3.5 text-base font-bold"
           :disabled="!canPlay"
-          @click="launcher.play()"
+          @click="launcher.requestPlay()"
         >
           <svg v-if="launcher.isBusy" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
