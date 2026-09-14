@@ -268,9 +268,17 @@ public sealed class LauncherFacadeService
                 }
 
                 var settings = _settingsService.Load();
-                var disabledMods = settings.DisabledMods.Count > 0
-                    ? new HashSet<string>(settings.DisabledMods, StringComparer.OrdinalIgnoreCase)
-                    : null;
+                if (MigrateDisabledModKeys(manifest, settings))
+                {
+                    _settingsService.Save(settings);
+                    if (_authSessionService.IsAuthenticated)
+                    {
+                        try { await _authSessionService.SaveModPrefsAsync(settings.DisabledMods, cancellationToken); }
+                        catch (Exception ex) { _diagnostics.Warn("Mods", $"Failed to sync migrated mod prefs to server: {ex.Message}"); }
+                    }
+                }
+
+                var disabledMods = ResolveDisabledModPaths(manifest, settings.DisabledMods);
 
                 var syncProgress = new Progress<SyncProgressInfo>(info =>
                     _stateService.SetProgress(
@@ -334,7 +342,8 @@ public sealed class LauncherFacadeService
 
                 _stateService.SetProgress("Ремонт", "Готово.", 100);
                 _stateService.SetStatus("Ремонт завершён. Теперь можно заново синхронизировать клиент.");
-                return OperationResponseDto.Success(GetState(), "Ремонт завершён.");
+                return OperationResponseDto.Success(GetState(),
+                    "Ремонт завершён. Настройки модов сброшены к настройкам сборки, старые сохранены в папке config-backups.");
             }
             catch (Exception ex)
             {
@@ -446,7 +455,7 @@ public sealed class LauncherFacadeService
                     Description = f.Description,
                     Optional = f.Optional,
                     Required = f.Required,
-                    Enabled = f.Required || !disabled.Contains(rel),
+                    Enabled = f.Required || !IsModDisabled(f, disabled),
                 };
             })
             .ToList();
@@ -461,20 +470,18 @@ public sealed class LauncherFacadeService
             return new ModToggleResponseDto { Ok = false, Message = "Путь к моду не указан." };
 
         // Check if mod is required
-        var manifest = _cachedManifest;
-        if (manifest is not null)
-        {
-            var entry = manifest.Files.FirstOrDefault(f =>
-                string.Equals(f.Path.Replace('\\', '/').Trim('/'), rel, StringComparison.OrdinalIgnoreCase));
-            if (entry?.Required == true)
-                return new ModToggleResponseDto { Ok = false, Message = "Этот мод обязателен и не может быть отключён." };
-        }
+        var entry = _cachedManifest?.Files.FirstOrDefault(f =>
+            string.Equals(NormalizeModPath(f.Path), rel, StringComparison.OrdinalIgnoreCase));
+        if (entry?.Required == true)
+            return new ModToggleResponseDto { Ok = false, Message = "Этот мод обязателен и не может быть отключён." };
 
+        // Stored by mod id when the manifest knows it, so the choice survives a version bump.
+        var key = entry is null ? rel : ModPrefKey(entry);
         var settings = _settingsService.Load();
-        if (enabled)
-            settings.DisabledMods.RemoveAll(m => string.Equals(m, rel, StringComparison.OrdinalIgnoreCase));
-        else if (!settings.DisabledMods.Any(m => string.Equals(m, rel, StringComparison.OrdinalIgnoreCase)))
-            settings.DisabledMods.Add(rel);
+        settings.DisabledMods.RemoveAll(m =>
+            string.Equals(m, rel, StringComparison.OrdinalIgnoreCase) || string.Equals(m, key, StringComparison.OrdinalIgnoreCase));
+        if (!enabled)
+            settings.DisabledMods.Add(key);
 
         _settingsService.Save(settings);
 
@@ -491,6 +498,51 @@ public sealed class LauncherFacadeService
             Message = enabled ? "Мод включён." : "Мод отключён. Изменения вступят в силу при следующем запуске игры.",
             Mods = modList.Mods,
         };
+    }
+
+    // Disabled optional mods are stored as "id:<modid>" when the manifest carries the mod id,
+    // otherwise (older manifests) as the relative jar path.
+    private const string ModIdPrefKeyPrefix = "id:";
+
+    private static string NormalizeModPath(string path) => (path ?? string.Empty).Replace('\\', '/').Trim('/');
+
+    private static string ModPrefKey(LauncherManifestFile file)
+        => string.IsNullOrWhiteSpace(file.ModId)
+            ? NormalizeModPath(file.Path)
+            : ModIdPrefKeyPrefix + file.ModId.Trim().ToLowerInvariant();
+
+    private static bool IsModDisabled(LauncherManifestFile file, IReadOnlySet<string> disabled)
+        => disabled.Contains(NormalizeModPath(file.Path)) || disabled.Contains(ModPrefKey(file));
+
+    private static HashSet<string>? ResolveDisabledModPaths(LauncherManifest manifest, IEnumerable<string> disabledPrefs)
+    {
+        var disabled = new HashSet<string>(disabledPrefs, StringComparer.OrdinalIgnoreCase);
+        if (disabled.Count == 0) return null;
+
+        return manifest.Files
+            .Where(f => f.Optional && !f.Required && IsModDisabled(f, disabled))
+            .Select(f => NormalizeModPath(f.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // Rewrites path-based entries to id-based ones for mods the manifest now identifies. Returns true if changed.
+    private static bool MigrateDisabledModKeys(LauncherManifest manifest, LauncherUserSettings settings)
+    {
+        var changed = false;
+        for (var i = 0; i < settings.DisabledMods.Count; i++)
+        {
+            var file = manifest.Files.FirstOrDefault(f =>
+                !string.IsNullOrWhiteSpace(f.ModId) &&
+                string.Equals(NormalizeModPath(f.Path), NormalizeModPath(settings.DisabledMods[i]), StringComparison.OrdinalIgnoreCase));
+            if (file is null) continue;
+
+            settings.DisabledMods[i] = ModPrefKey(file);
+            changed = true;
+        }
+
+        if (changed)
+            settings.DisabledMods = settings.DisabledMods.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return changed;
     }
 
     private async Task TryLoadModPrefsAsync(CancellationToken cancellationToken)

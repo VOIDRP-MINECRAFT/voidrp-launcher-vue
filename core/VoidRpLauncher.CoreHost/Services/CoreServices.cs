@@ -585,6 +585,21 @@ public sealed class FileSyncService
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    // Folders inside the game dir that the pack owns outright: any file there that the manifest
+    // does not list is client-generated junk and is moved out. CrashAssistant turns a leftover
+    // problematic_mods_config.json into 00_migrated_problematic_mods.jexl, which then kills the
+    // game on every start — and config/ is otherwise never cleaned, so players could not recover.
+    private static readonly string[] PackOwnedDirectories = ["config/crash_assistant/scripts/startup/"];
+    private static readonly string[] PackOwnedFilePrefixes = ["config/crash_assistant/problematic_mods_config.json"];
+
+    // Caches that mods themselves keep inside mods/. They are not pack files, so the rogue-mod scan
+    // must leave them alone: deleting Sinytra Connector's cache forces it to re-remap every Fabric
+    // mod on each launch, and MCEF keeps its per-platform CEF runtime next to the mods.
+    private static readonly string[] RogueScanIgnoredPrefixes = ["mods/.connector/", "mods/mcef-libraries/"];
+
+    // Player config files we replace or retire are copied here first (outside config/, so no mod reads them).
+    internal const string ConfigBackupDirectoryName = "config-backups";
+
     private readonly LauncherPathsService _pathsService;
     private readonly HashService _hashService;
     private readonly DiagnosticsService _diagnostics;
@@ -628,6 +643,13 @@ public sealed class FileSyncService
         var totalFiles = orderedFiles.Count;
         var logLock = new object();
         var completed = 0;
+
+        // config/ baselines: the SHA-256 of the version we last delivered for each config file.
+        var previousConfigHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, hash) in previousState.ConfigHashes)
+            previousConfigHashes[NormalizeRelativePath(path)] = hash;
+        var deliveredConfigHashes = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var backupRoot = Path.Combine(_pathsService.GameDirectory, ConfigBackupDirectoryName, DateTime.Now.ToString("yyyyMMdd-HHmmss"));
 
         // StreamWriter is not thread-safe; serialize all log writes behind a lock.
         void Log(string line)
@@ -689,7 +711,19 @@ public sealed class FileSyncService
                 return;
             }
 
-            if (NeedsDownload(entry, localPath, relativePath))
+            if (IsConfigPath(relativePath))
+                deliveredConfigHashes[relativePath] = entry.Sha256;
+
+            if (NeedsConfigUpdate(entry, localPath, relativePath, previousConfigHashes))
+            {
+                // We changed this file in the pack since the player got it: ship the new version,
+                // keeping the player's copy in config-backups in case they had tuned it.
+                BackupFile(localPath, relativePath, backupRoot);
+                _diagnostics.Info("Sync", $"Updating config changed in the pack: {relativePath}");
+                Log($"[UPDATE-CONFIG] {relativePath}");
+                await DownloadFileAsync(entry, localPath, ct);
+            }
+            else if (NeedsDownload(entry, localPath, relativePath))
             {
                 _diagnostics.Info("Sync", $"Downloading: {relativePath}");
                 Log($"[DOWNLOAD] {relativePath}");
@@ -766,9 +800,26 @@ public sealed class FileSyncService
             }
         }
 
+        // Config files we shipped before but dropped from the pack: retire them into the backup
+        // folder (a stale config from an older mod version can break that mod).
+        foreach (var relativePath in previousConfigHashes.Keys.Where(p => !currentManifestPaths.Contains(p)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fullPath = Path.Combine(_pathsService.GameDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(fullPath)) continue;
+            await logWriter.WriteLineAsync(RetireFile(fullPath, relativePath, backupRoot)
+                ? $"[RETIRE-CONFIG] {relativePath}"
+                : $"[RETIRE-CONFIG-FAILED] {relativePath}");
+        }
+
+        await RemoveUnlistedPackOwnedFilesAsync(currentManifestPaths, backupRoot, logWriter, cancellationToken);
         await ScanAndRemoveRogueModsAsync(currentManifestPaths, logWriter, progress, cancellationToken);
 
-        await SaveStateAsync(stateFilePath, new SyncState { Files = currentManifestPaths.Where(p => !IsPlayerWritable(p)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList() }, cancellationToken);
+        await SaveStateAsync(stateFilePath, new SyncState
+        {
+            Files = currentManifestPaths.Where(p => !IsPlayerWritable(p)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+            ConfigHashes = deliveredConfigHashes.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).ToDictionary(kv => kv.Key, kv => kv.Value)
+        }, cancellationToken);
         _hashService.Flush();
         progress?.Report(new SyncProgressInfo { Stage = "Готово", Percent = 100, ProcessedFiles = orderedFiles.Count, TotalFiles = orderedFiles.Count, DetailMessage = "Синхронизация завершена." });
         _diagnostics.Info("Sync", $"Sync finished. Log file: {logFilePath}");
@@ -786,6 +837,7 @@ public sealed class FileSyncService
                 return (fullPath, relativePath);
             })
             .Where(f => !currentManifestPaths.Contains(f.relativePath))
+            .Where(f => !RogueScanIgnoredPrefixes.Any(p => f.relativePath.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(f => f.relativePath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -825,6 +877,88 @@ public sealed class FileSyncService
             }
         }
     }
+
+    private async Task RemoveUnlistedPackOwnedFilesAsync(HashSet<string> currentManifestPaths, string backupRoot, StreamWriter logWriter, CancellationToken cancellationToken)
+    {
+        var gameDir = _pathsService.GameDirectory;
+        var candidates = new List<(string FullPath, string RelativePath)>();
+
+        foreach (var dir in PackOwnedDirectories)
+        {
+            var fullDir = Path.Combine(gameDir, dir.TrimEnd('/').Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(fullDir)) continue;
+            candidates.AddRange(Directory.EnumerateFiles(fullDir, "*", SearchOption.AllDirectories)
+                .Select(f => (f, NormalizeRelativePath(Path.GetRelativePath(gameDir, f)))));
+        }
+
+        foreach (var prefix in PackOwnedFilePrefixes)
+        {
+            var fullDir = Path.Combine(gameDir, Path.GetDirectoryName(prefix.Replace('/', Path.DirectorySeparatorChar))!);
+            if (!Directory.Exists(fullDir)) continue;
+            candidates.AddRange(Directory.EnumerateFiles(fullDir, Path.GetFileName(prefix) + "*", SearchOption.TopDirectoryOnly)
+                .Select(f => (f, NormalizeRelativePath(Path.GetRelativePath(gameDir, f)))));
+        }
+
+        foreach (var (fullPath, relativePath) in candidates.Where(c => !currentManifestPaths.Contains(c.RelativePath)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var retired = RetireFile(fullPath, relativePath, backupRoot);
+            await logWriter.WriteLineAsync(retired ? $"[RETIRE-UNLISTED] {relativePath}" : $"[RETIRE-UNLISTED-FAILED] {relativePath}");
+            if (retired) _diagnostics.Warn("Sync", $"Removed client-generated file not in the pack: {relativePath}");
+        }
+    }
+
+    // A plain config/ file is shipped once and then left to the player — except when we changed
+    // it in the pack since the version recorded for this client. Without a recorded baseline
+    // (first sync with this launcher version) we cannot tell, so the local copy wins.
+    private bool NeedsConfigUpdate(LauncherManifestFile entry, string localPath, string relativePath, IReadOnlyDictionary<string, string> previousConfigHashes)
+    {
+        if (entry.AlwaysOverwrite || entry.Managed || !IsConfigPath(relativePath) || !File.Exists(localPath)) return false;
+        if (!previousConfigHashes.TryGetValue(relativePath, out var delivered)) return false;
+        if (delivered.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
+
+        return !_hashService.ComputeSha256(localPath).Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void BackupFile(string fullPath, string relativePath, string backupRoot)
+    {
+        try
+        {
+            var target = Path.Combine(backupRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(fullPath, target, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            _diagnostics.Warn("Sync", $"Failed to back up {relativePath}: {ex.Message}");
+        }
+    }
+
+    // Moves a file into the backup folder (falls back to deleting when the move is impossible).
+    private bool RetireFile(string fullPath, string relativePath, string backupRoot)
+    {
+        try
+        {
+            var target = Path.Combine(backupRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Move(fullPath, target, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(fullPath); }
+            catch (Exception ex)
+            {
+                _diagnostics.Warn("Sync", $"Failed to remove {relativePath}: {ex.Message}");
+                return false;
+            }
+        }
+
+        DeleteEmptyParentDirectories(fullPath, _pathsService.GameDirectory);
+        return true;
+    }
+
+    private static bool IsConfigPath(string relativePath)
+        => NormalizeRelativePath(relativePath).StartsWith("config/", StringComparison.OrdinalIgnoreCase);
 
     private bool NeedsDownload(LauncherManifestFile entry, string localPath, string relativePath)
     {
@@ -915,6 +1049,7 @@ public sealed class FileSyncService
             || normalized.StartsWith("logs/", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith("crash-reports/", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith("downloads/", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith(ConfigBackupDirectoryName + "/", StringComparison.OrdinalIgnoreCase)
             || IsPlayerWritable(normalized);
     }
 
@@ -965,6 +1100,8 @@ public sealed class FileSyncService
     private sealed class SyncState
     {
         public List<string> Files { get; set; } = new();
+        // config/ path -> SHA-256 of the pack version last delivered to this client.
+        public Dictionary<string, string> ConfigHashes { get; set; } = new();
     }
 }
 
@@ -1040,6 +1177,12 @@ public sealed class ClientRepairService
             }
         }
 
+        // config/ is never re-asserted by a normal sync, so a broken or outdated config can only be
+        // fixed here. Move it aside (not delete) so a player's tuned settings can still be recovered;
+        // the next sync ships the pack's configs fresh and per-account ones are restored from the cloud.
+        progress?.Report("Сбрасываем конфиги модов (копия в config-backups)...");
+        ResetConfigDirectory();
+
         progress?.Report("Удаляем state-файлы...");
 
         foreach (var stateFile in stateFiles)
@@ -1068,6 +1211,42 @@ public sealed class ClientRepairService
 
         progress?.Report("Ремонт завершён.");
         _diagnostics.Info("Repair", "Repair finished.");
+    }
+
+    private void ResetConfigDirectory()
+    {
+        var configDir = Path.Combine(_pathsService.GameDirectory, "config");
+        if (!Directory.Exists(configDir)) return;
+
+        var backupDir = Path.Combine(_pathsService.GameDirectory, FileSyncService.ConfigBackupDirectoryName,
+            $"{DateTime.Now:yyyyMMdd-HHmmss}-repair", "config");
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(backupDir)!);
+            Directory.Move(configDir, backupDir);
+            _diagnostics.Info("Repair", $"config/ moved to {backupDir}");
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Usually a file held open by a running game or an antivirus; fall back to per-file moves.
+            _diagnostics.Warn("Repair", $"Could not move config/ as a whole, moving files one by one: {ex.Message}");
+        }
+
+        foreach (var file in Directory.EnumerateFiles(configDir, "*", SearchOption.AllDirectories).ToList())
+        {
+            try
+            {
+                var target = Path.Combine(backupDir, Path.GetRelativePath(configDir, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(file, target, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.Warn("Repair", $"Failed to reset config file {file}: {ex.Message}");
+            }
+        }
     }
 
     private static bool IsProtected(string relativePath)

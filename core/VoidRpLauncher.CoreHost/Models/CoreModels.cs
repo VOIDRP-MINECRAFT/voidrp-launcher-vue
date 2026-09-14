@@ -34,6 +34,9 @@ public sealed class LauncherManifestFile
     public bool Managed { get; set; }
     public bool Optional { get; set; }
     public bool Required { get; set; }
+    // Mod id from the jar's neoforge.mods.toml (optional mods only). Lets a player's "disabled"
+    // choice survive a version bump, which changes the file name.
+    public string ModId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
 }

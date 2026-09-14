@@ -159,9 +159,13 @@ async function fetchTier(nick: string) {
 // Refetch the tier badge on nickname change AND on server switch (per-server
 // progression). Clear first so a server without progression (e.g. anarchy) never
 // shows a stale tier from the previous server.
+// The source is a primitive string on purpose: the state poll replaces the
+// dashboard object every 1.2 s, and a tuple source would be a new array each
+// time — re-firing this watcher, blanking the badge and refetching (flicker).
 watch(
-  () => [launcher.playerStats.minecraftNickname, launcher.selectedSlug] as const,
-  ([nick]) => {
+  () => `${launcher.playerStats.minecraftNickname ?? ''} ${launcher.selectedSlug ?? ''}`,
+  () => {
+    const nick = launcher.playerStats.minecraftNickname
     currentTierLabel.value = null
     if (nick && feat('progression')) fetchTier(nick)
   },
