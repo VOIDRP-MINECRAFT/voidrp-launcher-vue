@@ -349,6 +349,7 @@ public sealed class LauncherFacadeService
                     _stateService.SetProgress("Ремонт", message, 50));
 
                 await _clientRepairService.RepairAsync(repairProgress, cancellationToken);
+                _crashHistory.MarkLatestResolved();
 
                 _stateService.SetProgress("Ремонт", "Готово.", 100);
                 _stateService.SetStatus("Ремонт завершён. Теперь можно заново синхронизировать клиент.");
@@ -659,11 +660,23 @@ public sealed class LauncherFacadeService
     private LauncherCrashInfoDto AdviseCrash(int exitCode, string? logTail, string? crashReport)
     {
         var advice = CrashAdvisor.Classify(exitCode, logTail, crashReport, _crashRules.EffectiveRules());
-        CrashAdvisor.ApplyRepeat(advice, _crashHistory.Record(advice.RuleKey, advice.Title));
+        CrashAdvisor.ApplyRepeat(advice, _crashHistory.Record(advice.RuleKey, advice.Title, advice));
         _stateService.SetCrash(advice);
         _stateService.SetStatus($"Игра завершилась с ошибкой: {advice.Title}");
         _diagnostics.Warn("Crash", $"Advice: rule={advice.RuleKey ?? "<none>"} repeat={advice.RepeatCount}");
         return advice;
+    }
+
+    /// <summary>Puts the last recorded crash advice back on screen (pre-launch reminder, survives launcher restarts).</summary>
+    public OperationResponseDto RestoreLastCrash()
+    {
+        var advice = _crashHistory.Latest()?.Advice;
+        if (advice is null)
+            return OperationResponseDto.Failure(GetState(), "Подсказка о прошлой ошибке больше недоступна.");
+
+        advice.Id = Guid.NewGuid().ToString("N");   // a fresh id so a previously dismissed window opens again
+        _stateService.SetCrash(advice);
+        return OperationResponseDto.Success(GetState());
     }
 
     /// <summary>Runs a crash-fix button from the advice window. Renderer-only actions just acknowledge.</summary>
@@ -689,6 +702,7 @@ public sealed class LauncherFacadeService
                     // Paths were confined to config/ when the advice was built; re-check before touching disk.
                     var paths = action.Paths.Select(CrashAdvisor.SafeConfigPath).Where(p => p is not null).Select(p => p!).ToList();
                     var moved = _fileSyncService.RetireFiles(paths, "crash-fix");
+                    _crashHistory.MarkLatestResolved();
                     _diagnostics.Info("Crash", $"Fix action {action.Type}: moved {moved} of {paths.Count} file(s).");
                     var message = moved > 0
                         ? "Готово: файл убран, копия лежит в папке config-backups. Можно запускать игру."
@@ -700,6 +714,7 @@ public sealed class LauncherFacadeService
                 return await RunExclusiveAsync(() =>
                 {
                     _clientRepairService.ResetConfigDirectory();
+                    _crashHistory.MarkLatestResolved();
                     return Task.FromResult(OperationResponseDto.Success(GetState(),
                         "Настройки модов сброшены, старые сохранены в папке config-backups. При запуске лаунчер скачает настройки сборки."));
                 });

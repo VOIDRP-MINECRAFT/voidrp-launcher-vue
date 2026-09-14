@@ -147,6 +147,22 @@ public sealed class CrashActionDto
     public List<string> Paths { get; set; } = new();
 }
 
+public sealed class PreflightResultDto
+{
+    public List<PreflightWarningDto> Warnings { get; set; } = new();
+}
+
+public sealed class PreflightWarningDto
+{
+    // Stable id: the renderer remembers "don't warn me again" per id.
+    public string Id { get; set; } = string.Empty;
+    // "critical" | "warning" | "info"
+    public string Severity { get; set; } = "warning";
+    public string Title { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public List<CrashActionDto> Actions { get; set; } = new();
+}
+
 public sealed class CrashActionCommandDto
 {
     public string CrashId { get; set; } = string.Empty;

@@ -49,10 +49,12 @@ public static class CrashActionTypes
     public const string OpenSettings = "open_settings";
     public const string Relaunch = "relaunch";
     public const string CopyReport = "copy_report";
+    // Re-opens the last crash advice window (pre-launch reminder).
+    public const string ShowCrash = "show_crash";
 
     public static readonly HashSet<string> All = new()
     {
-        FixFiles, ResetConfig, ResetAllConfigs, Repair, OpenSettings, Relaunch, CopyReport,
+        FixFiles, ResetConfig, ResetAllConfigs, Repair, OpenSettings, Relaunch, CopyReport, ShowCrash,
     };
 }
 

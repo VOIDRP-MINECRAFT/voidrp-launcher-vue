@@ -501,7 +501,8 @@ public sealed class LauncherSettingsService
         try
         {
             long totalGb = GetTotalPhysicalMemoryBytes() / (1024L * 1024 * 1024);
-            return totalGb >= 16 ? 6144 : 4096;
+            // 4 GB is too little for this pack (Sodium/Iris fail to start); 12 GB machines can spare 6.
+            return totalGb >= 12 ? 6144 : 4096;
         }
         catch
         {
@@ -509,7 +510,7 @@ public sealed class LauncherSettingsService
         }
     }
 
-    private static long GetTotalPhysicalMemoryBytes()
+    public static long GetTotalPhysicalMemoryBytes()
     {
         if (OperatingSystem.IsLinux())
         {

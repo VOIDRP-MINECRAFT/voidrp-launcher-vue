@@ -63,6 +63,7 @@ builder.Services.AddSingleton(sp => new LauncherTokenStore(sp.GetRequiredService
 builder.Services.AddSingleton(sp => new LauncherPlayTicketStore(sp.GetRequiredService<LauncherPathsService>().StateDirectory));
 builder.Services.AddSingleton<LauncherAuthSessionService>();
 builder.Services.AddSingleton<CrashRuleService>();
+builder.Services.AddSingleton<PreflightService>();
 builder.Services.AddSingleton<AuthenticatedLaunchService>();
 builder.Services.AddSingleton<LauncherFacadeService>();
 
@@ -129,6 +130,12 @@ app.MapPost("/api/servers/select", async (ServerSelectDto dto, ServerCatalogServ
 
 app.MapPost("/api/actions/repair", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.RepairAsync(CancellationToken.None)));
+
+app.MapGet("/api/preflight", (PreflightService preflight) =>
+    Results.Ok(preflight.Run()));
+
+app.MapPost("/api/crash/restore", (LauncherFacadeService facade) =>
+    Results.Ok(facade.RestoreLastCrash()));
 
 app.MapPost("/api/crash/action", async (CrashActionCommandDto dto, LauncherFacadeService facade) =>
     Results.Ok(await facade.ExecuteCrashActionAsync(dto, CancellationToken.None)));
