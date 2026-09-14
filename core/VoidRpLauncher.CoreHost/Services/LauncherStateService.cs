@@ -84,6 +84,14 @@ public sealed class LauncherStateService
         }
     }
 
+    public LauncherCrashInfoDto? GetCrash()
+    {
+        lock (_lock)
+        {
+            return _lastCrash;
+        }
+    }
+
     public void ClearCrash()
     {
         lock (_lock)

@@ -33,6 +33,7 @@ public sealed class LauncherFacadeService
     private readonly DiagnosticsService _diagnostics;
     private readonly AppVersionService _appVersionService;
     private readonly ServerCatalogService _serverCatalog;
+    private readonly CrashHistoryService _crashHistory;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private LauncherManifest? _cachedManifest;
 
@@ -49,8 +50,10 @@ public sealed class LauncherFacadeService
         LauncherStateService stateService,
         DiagnosticsService diagnostics,
         AppVersionService appVersionService,
-        ServerCatalogService serverCatalog)
+        ServerCatalogService serverCatalog,
+        CrashHistoryService crashHistory)
     {
+        _crashHistory = crashHistory;
         _endpoints = endpoints;
         _serverCatalog = serverCatalog;
         _manifestService = manifestService;
@@ -620,31 +623,82 @@ public sealed class LauncherFacadeService
             if (exitCode == McefCrashCode)
             {
                 _diagnostics.Warn("Crash", $"Game exited with MCEF crash code {exitCode} (0xC0000409). Skipping crash report.");
-                _stateService.SetStatus("Minecraft завершился с ошибкой MCEF (код -1073740791). Попробуйте переустановить лаунчер или обратитесь в поддержку.");
                 // Still surface advice to the player even though we don't spam the backend.
-                _stateService.SetCrash(CrashAdvisor.Classify(exitCode, TryReadLogTail(48 * 1024), null));
+                AdviseCrash(exitCode, TryReadLogTail(48 * 1024), null);
                 return;
             }
 
             // Crash detection: exit code != 0 OR a new crash report file appeared since launch.
             var crashReportContent = TryReadLatestCrashReport(gameStartedAt);
             var isCrash = exitCode != 0 || crashReportContent != null;
-            if (isCrash)
+            if (!isCrash)
             {
-                _diagnostics.Warn("Crash", $"Crash detected (exit={exitCode}). Sending report...");
-                var diag = BuildCrashDiagnostics(crashReportContent);
-                await _authSessionService.ReportCrashAsync(exitCode, diag, CancellationToken.None);
-
-                // Show the player what went wrong and how to fix it.
-                var advice = CrashAdvisor.Classify(exitCode, diag.LogTail, diag.CrashReport);
-                _stateService.SetCrash(advice);
-                if (advice != null)
-                    _stateService.SetStatus($"Игра завершилась с ошибкой: {advice.Title}");
+                _crashHistory.Clear();
+                return;
             }
+
+            _diagnostics.Warn("Crash", $"Crash detected (exit={exitCode}). Sending report...");
+            var diag = BuildCrashDiagnostics(crashReportContent);
+            // Show the player what went wrong and how to fix it.
+            AdviseCrash(exitCode, diag.LogTail, diag.CrashReport);
+            await _authSessionService.ReportCrashAsync(exitCode, diag, CancellationToken.None);
         }
         catch (Exception ex)
         {
             _diagnostics.Warn("Config", $"Game watcher error: {ex.Message}");
+        }
+    }
+
+    private LauncherCrashInfoDto AdviseCrash(int exitCode, string? logTail, string? crashReport)
+    {
+        var advice = CrashAdvisor.Classify(exitCode, logTail, crashReport, CrashAdvisor.EffectiveRules(null));
+        CrashAdvisor.ApplyRepeat(advice, _crashHistory.Record(advice.RuleKey, advice.Title));
+        _stateService.SetCrash(advice);
+        _stateService.SetStatus($"Игра завершилась с ошибкой: {advice.Title}");
+        _diagnostics.Warn("Crash", $"Advice: rule={advice.RuleKey ?? "<none>"} repeat={advice.RepeatCount}");
+        return advice;
+    }
+
+    /// <summary>Runs a crash-fix button from the advice window. Renderer-only actions just acknowledge.</summary>
+    public async Task<OperationResponseDto> ExecuteCrashActionAsync(CrashActionCommandDto command, CancellationToken cancellationToken = default)
+    {
+        var crash = _stateService.GetCrash();
+        if (crash is null || !string.Equals(crash.Id, command.CrashId, StringComparison.Ordinal))
+            return OperationResponseDto.Failure(GetState(), "Это окно ошибки уже неактуально.");
+
+        var action = crash.Actions.FirstOrDefault(a => a.Index == command.ActionIndex);
+        if (action is null)
+            return OperationResponseDto.Failure(GetState(), "Действие не найдено.");
+
+        switch (action.Type)
+        {
+            case CrashActionTypes.Repair:
+                return await RepairAsync(cancellationToken);
+
+            case CrashActionTypes.FixFiles:
+            case CrashActionTypes.ResetConfig:
+                return await RunExclusiveAsync(() =>
+                {
+                    // Paths were confined to config/ when the advice was built; re-check before touching disk.
+                    var paths = action.Paths.Select(CrashAdvisor.SafeConfigPath).Where(p => p is not null).Select(p => p!).ToList();
+                    var moved = _fileSyncService.RetireFiles(paths, "crash-fix");
+                    _diagnostics.Info("Crash", $"Fix action {action.Type}: moved {moved} of {paths.Count} file(s).");
+                    var message = moved > 0
+                        ? "Готово: файл убран, копия лежит в папке config-backups. Можно запускать игру."
+                        : "Файл уже убран — можно запускать игру.";
+                    return Task.FromResult(OperationResponseDto.Success(GetState(), message));
+                });
+
+            case CrashActionTypes.ResetAllConfigs:
+                return await RunExclusiveAsync(() =>
+                {
+                    _clientRepairService.ResetConfigDirectory();
+                    return Task.FromResult(OperationResponseDto.Success(GetState(),
+                        "Настройки модов сброшены, старые сохранены в папке config-backups. При запуске лаунчер скачает настройки сборки."));
+                });
+
+            default:
+                return OperationResponseDto.Success(GetState());
         }
     }
 

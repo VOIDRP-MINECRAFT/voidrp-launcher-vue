@@ -131,6 +131,26 @@ public sealed class LauncherCrashInfoDto
     public string Solution { get; set; } = string.Empty;
     public bool Recognized { get; set; }
     public DateTimeOffset DetectedAt { get; set; }
+    // Key of the rule that recognized the crash (null when unrecognized) — also sent to the backend.
+    public string? RuleKey { get; set; }
+    // How many crashes with the same rule (or unrecognized) happened within the last day, this one included.
+    public int RepeatCount { get; set; } = 1;
+    public List<CrashActionDto> Actions { get; set; } = new();
+}
+
+public sealed class CrashActionDto
+{
+    public int Index { get; set; }
+    public string Type { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    // Resolved game-dir relative paths for file actions.
+    public List<string> Paths { get; set; } = new();
+}
+
+public sealed class CrashActionCommandDto
+{
+    public string CrashId { get; set; } = string.Empty;
+    public int ActionIndex { get; set; }
 }
 
 public sealed class OperationResponseDto

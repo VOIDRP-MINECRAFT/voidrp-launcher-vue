@@ -957,6 +957,23 @@ public sealed class FileSyncService
         return true;
     }
 
+    /// <summary>
+    /// Moves existing game-dir relative files into config-backups/&lt;timestamp&gt;-&lt;suffix&gt;/.
+    /// Used by crash-fix actions; callers pass paths already confined to config/.
+    /// </summary>
+    public int RetireFiles(IEnumerable<string> relativePaths, string backupSuffix)
+    {
+        var backupRoot = Path.Combine(_pathsService.GameDirectory, ConfigBackupDirectoryName, $"{DateTime.Now:yyyyMMdd-HHmmss}-{backupSuffix}");
+        var moved = 0;
+        foreach (var relativePath in relativePaths.Select(NormalizeRelativePath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var fullPath = Path.Combine(_pathsService.GameDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(fullPath) && RetireFile(fullPath, relativePath, backupRoot))
+                moved++;
+        }
+        return moved;
+    }
+
     private static bool IsConfigPath(string relativePath)
         => NormalizeRelativePath(relativePath).StartsWith("config/", StringComparison.OrdinalIgnoreCase);
 
@@ -1213,7 +1230,7 @@ public sealed class ClientRepairService
         _diagnostics.Info("Repair", "Repair finished.");
     }
 
-    private void ResetConfigDirectory()
+    public void ResetConfigDirectory()
     {
         var configDir = Path.Combine(_pathsService.GameDirectory, "config");
         if (!Directory.Exists(configDir)) return;

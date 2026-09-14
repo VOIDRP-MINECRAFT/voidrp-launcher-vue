@@ -48,6 +48,7 @@ builder.Services.AddSingleton<RuntimeBootstrapService>();
 builder.Services.AddSingleton<LocalMinecraftLaunchService>();
 builder.Services.AddSingleton<LauncherStateService>();
 builder.Services.AddSingleton<ServerCatalogService>();
+builder.Services.AddSingleton<CrashHistoryService>();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -127,6 +128,9 @@ app.MapPost("/api/servers/select", async (ServerSelectDto dto, ServerCatalogServ
 
 app.MapPost("/api/actions/repair", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.RepairAsync(CancellationToken.None)));
+
+app.MapPost("/api/crash/action", async (CrashActionCommandDto dto, LauncherFacadeService facade) =>
+    Results.Ok(await facade.ExecuteCrashActionAsync(dto, CancellationToken.None)));
 
 app.MapGet("/api/settings", (LauncherFacadeService facade) =>
     Results.Ok(facade.GetState()));
