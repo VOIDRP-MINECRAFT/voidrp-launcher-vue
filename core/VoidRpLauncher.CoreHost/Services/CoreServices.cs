@@ -101,6 +101,13 @@ public sealed class LauncherPathsService
     public string BaseDirectory { get; }
     public string LauncherInstallDirectory { get; }
 
+    // Where servers/<slug> (game files, Java, per-server state) live. Players can move it to another
+    // drive in Settings; auth, settings and the launcher's own state always stay in BaseDirectory,
+    // which is how the chosen location is found again on the next start.
+    public string GamesRootDirectory { get; private set; }
+    public bool IsCustomGamesRoot => !string.Equals(GamesRootDirectory, BaseDirectory, StringComparison.OrdinalIgnoreCase);
+    private string GameLocationFilePath => Path.Combine(StateDirectory, "game-location.json");
+
     // The slug of the server whose files are currently active. Set dynamically
     // from the backend catalogue (never hardcoded), so every server — including
     // ones added later — gets its own isolated install under servers/<slug>/.
@@ -110,7 +117,7 @@ public sealed class LauncherPathsService
     // run, fully offline) we fall back to the legacy single-server layout so
     // existing installs keep working until the catalogue resolves the slug.
     private string? ServerRootDirectory =>
-        string.IsNullOrEmpty(ActiveServerSlug) ? null : Path.Combine(BaseDirectory, "servers", ActiveServerSlug);
+        string.IsNullOrEmpty(ActiveServerSlug) ? null : Path.Combine(GamesRootDirectory, "servers", ActiveServerSlug);
 
     public string GameDirectory => ServerRootDirectory is null
         ? Path.Combine(BaseDirectory, "game")
@@ -177,7 +184,7 @@ public sealed class LauncherPathsService
     // never removed by legacy cleanup.
     private static readonly HashSet<string> GlobalStateFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "launcher-auth.json", "play-ticket.json", "selected-server.json", "hash-cache.json",
+        "launcher-auth.json", "play-ticket.json", "selected-server.json", "hash-cache.json", "game-location.json",
     };
 
     // After migrating the legacy install we remove the now-orphaned per-server
@@ -235,6 +242,42 @@ public sealed class LauncherPathsService
         _platformService = platformService;
         BaseDirectory = ResolveBaseDirectory();
         LauncherInstallDirectory = ResolveLauncherInstallDirectory();
+        GamesRootDirectory = LoadGamesRoot() ?? BaseDirectory;
+    }
+
+    /// <summary>Persists a new games root (null = back to BaseDirectory). Files must already be in place.</summary>
+    public void SetGamesRoot(string? root)
+    {
+        var normalized = string.IsNullOrWhiteSpace(root) ? null : Path.GetFullPath(root);
+        if (normalized is not null && string.Equals(normalized, BaseDirectory, StringComparison.OrdinalIgnoreCase))
+            normalized = null;
+
+        Directory.CreateDirectory(StateDirectory);
+        if (normalized is null)
+        {
+            if (File.Exists(GameLocationFilePath)) File.Delete(GameLocationFilePath);
+        }
+        else
+        {
+            File.WriteAllText(GameLocationFilePath, JsonSerializer.Serialize(new Dictionary<string, string> { ["root"] = normalized }));
+        }
+        GamesRootDirectory = normalized ?? BaseDirectory;
+    }
+
+    private string? LoadGamesRoot()
+    {
+        try
+        {
+            if (!File.Exists(GameLocationFilePath)) return null;
+            var data = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(GameLocationFilePath));
+            var root = data is not null && data.TryGetValue("root", out var value) ? value : null;
+            // A removed USB/second drive must not brick the launcher: fall back to the default place.
+            return !string.IsNullOrWhiteSpace(root) && Path.IsPathFullyQualified(root) && Directory.Exists(root) ? root : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private string ResolveBaseDirectory()

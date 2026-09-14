@@ -118,6 +118,15 @@ export interface PreflightWarning {
   actions: CrashAction[]
 }
 
+export interface GameLocationInfo {
+  currentRoot: string
+  defaultRoot: string
+  isCustom: boolean
+  gameDirectory: string
+  sizeBytes: number | null
+  freeBytes: number | null
+}
+
 export const SERVER_SIDE_CRASH_ACTIONS = new Set(['fix_files', 'reset_config', 'reset_all_configs', 'repair'])
 
 const PREFLIGHT_MUTED_KEY = 'voidrp_preflight_muted_v1'
@@ -910,6 +919,36 @@ export const useLauncherStore = defineStore('launcher', () => {
     return null
   }
 
+  // ── Game files location ─────────────────────────────────────────────────
+  async function getGameLocation(includeSize = false) {
+    try {
+      return await readJson<GameLocationInfo>(`/api/settings/game-location${includeSize ? '?size=true' : ''}`)
+    } catch {
+      return null
+    }
+  }
+
+  function selectDirectory(defaultPath: string) {
+    const desktop = (window as any)?.desktop
+    return desktop?.selectDirectory ? (desktop.selectDirectory(defaultPath) as Promise<string>) : Promise.resolve('')
+  }
+
+  async function changeGameLocation(path: string | null, moveFiles: boolean) {
+    try {
+      const response = await readJson<OperationResponse>('/api/settings/game-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, moveFiles }),
+      })
+      applyState(response.state)
+      pushToast(response.ok ? 'success' : 'error', response.ok ? 'Папка игры изменена' : 'Не удалось сменить папку', normalizeMessage(response.message) || '')
+      return response
+    } catch (error: unknown) {
+      pushToast('error', 'Не удалось сменить папку', sanitizeError(error) || 'Ошибка переноса файлов.')
+      return null
+    }
+  }
+
   function openPath(targetPath: string) {
     const target = String(targetPath || '').trim()
     if (!target) return Promise.resolve('')
@@ -974,6 +1013,9 @@ export const useLauncherStore = defineStore('launcher', () => {
     playDespitePreflight,
     runCrashAction,
     restoreCrash,
+    getGameLocation,
+    selectDirectory,
+    changeGameLocation,
     repair,
     clearDiagnostics,
     uploadSkin,

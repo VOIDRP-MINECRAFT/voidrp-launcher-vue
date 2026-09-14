@@ -163,6 +163,25 @@ public sealed class PreflightWarningDto
     public List<CrashActionDto> Actions { get; set; } = new();
 }
 
+public sealed class GameLocationInfoDto
+{
+    public string CurrentRoot { get; set; } = string.Empty;
+    public string DefaultRoot { get; set; } = string.Empty;
+    public bool IsCustom { get; set; }
+    public string GameDirectory { get; set; } = string.Empty;
+    // Size of servers/ at the current root (only when requested — walking it takes a moment).
+    public long? SizeBytes { get; set; }
+    public long? FreeBytes { get; set; }
+}
+
+public sealed class GameLocationCommandDto
+{
+    // Empty = back to the default location.
+    public string? Path { get; set; }
+    // false = just point the launcher at the folder (it already holds the files, or a fresh download is fine).
+    public bool MoveFiles { get; set; } = true;
+}
+
 public sealed class CrashActionCommandDto
 {
     public string CrashId { get; set; } = string.Empty;

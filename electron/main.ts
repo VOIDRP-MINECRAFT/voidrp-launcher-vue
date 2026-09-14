@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 
 // Required for WebGL to work correctly in webview on all GPUs
 app.commandLine.appendSwitch('ignore-gpu-blacklist')
@@ -655,6 +655,18 @@ function registerIpcHandlers() {
     if (!url) return false
     await shell.openExternal(url)
     return true
+  })
+
+  // Folder picker for «Папка с файлами игры». Returns '' when the player cancels.
+  ipcMain.handle('desktop:select-directory', async (event, defaultPath?: string) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const options: Electron.OpenDialogOptions = {
+      title: 'Папка для файлов игры',
+      defaultPath: defaultPath || undefined,
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+    }
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    return result.canceled || result.filePaths.length === 0 ? '' : result.filePaths[0]
   })
 
   ipcMain.handle('desktop:open-path', async (_event, targetPath?: string) => {

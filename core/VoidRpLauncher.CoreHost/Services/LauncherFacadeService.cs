@@ -35,6 +35,9 @@ public sealed class LauncherFacadeService
     private readonly ServerCatalogService _serverCatalog;
     private readonly CrashHistoryService _crashHistory;
     private readonly CrashRuleService _crashRules;
+    private readonly GameLocationService _gameLocation;
+    // Games started by this launcher that have not exited yet (moving files under a running game breaks it).
+    private int _runningGames;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
     private LauncherManifest? _cachedManifest;
 
@@ -53,8 +56,10 @@ public sealed class LauncherFacadeService
         AppVersionService appVersionService,
         ServerCatalogService serverCatalog,
         CrashHistoryService crashHistory,
-        CrashRuleService crashRules)
+        CrashRuleService crashRules,
+        GameLocationService gameLocation)
     {
+        _gameLocation = gameLocation;
         _crashHistory = crashHistory;
         _crashRules = crashRules;
         _endpoints = endpoints;
@@ -318,6 +323,8 @@ public sealed class LauncherFacadeService
                 var gameProcess = await _authenticatedLaunchService.LaunchAsync(manifest, memoryMb, launchProgress, cancellationToken);
 
                 // Fire-and-forget: upload config files and report crashes when game exits
+                Interlocked.Increment(ref _runningGames);
+                _ = TrackGameExitAsync(gameProcess);
                 if (_authSessionService.IsAuthenticated)
                     _ = WatchGameAndUploadConfigsAsync(gameProcess, DateTime.UtcNow);
 
@@ -666,6 +673,53 @@ public sealed class LauncherFacadeService
         _diagnostics.Warn("Crash", $"Advice: rule={advice.RuleKey ?? "<none>"} repeat={advice.RepeatCount}");
         return advice;
     }
+
+    private async Task TrackGameExitAsync(Process process)
+    {
+        try { await process.WaitForExitAsync(); }
+        catch { }
+        finally { Interlocked.Decrement(ref _runningGames); }
+    }
+
+    public GameLocationInfoDto GetGameLocation(bool includeSize) => _gameLocation.GetInfo(includeSize);
+
+    public async Task<OperationResponseDto> ChangeGameLocationAsync(GameLocationCommandDto command, CancellationToken cancellationToken = default)
+        => await RunExclusiveAsync(async () =>
+        {
+            if (Volatile.Read(ref _runningGames) > 0)
+                return OperationResponseDto.Failure(GetState(), "Сначала закройте игру — файлы нельзя переносить, пока она запущена.");
+
+            var error = _gameLocation.Validate(command.Path, command.MoveFiles);
+            if (error is not null)
+                return OperationResponseDto.Failure(GetState(), error);
+
+            // CEF helpers from a previous game session keep files in the game folder locked.
+            KillLingeringCefProcesses();
+            try
+            {
+                _stateService.SetProgress("Перенос файлов игры", "Готовим перенос...", 0);
+                await _gameLocation.MoveAsync(command.Path, command.MoveFiles,
+                    (details, percent) => _stateService.SetProgress("Перенос файлов игры", details, ClampPercent(percent)),
+                    cancellationToken);
+                _cachedManifest = null;
+                _serverCatalog.ApplyActiveServerToPaths();
+            }
+            catch (Exception ex)
+            {
+                _diagnostics.AppendException("GameLocation", ex);
+                return OperationResponseDto.Failure(GetState(), $"Не удалось перенести файлы: {ex.Message}. Игра осталась в старой папке.");
+            }
+            finally
+            {
+                _stateService.ClearProgress();
+            }
+
+            var message = command.MoveFiles
+                ? "Файлы игры перенесены. Можно запускать."
+                : "Папка игры изменена. При запуске лаунчер докачает недостающие файлы.";
+            _stateService.SetStatus(message);
+            return OperationResponseDto.Success(GetState(), message);
+        });
 
     /// <summary>Puts the last recorded crash advice back on screen (pre-launch reminder, survives launcher restarts).</summary>
     public OperationResponseDto RestoreLastCrash()

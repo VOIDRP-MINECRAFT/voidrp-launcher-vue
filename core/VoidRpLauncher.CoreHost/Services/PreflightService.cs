@@ -37,6 +37,7 @@ public sealed class PreflightService
         var result = new PreflightResultDto();
         try { CheckMemory(result.Warnings); } catch (Exception ex) { _diagnostics.Warn("Preflight", $"Memory check failed: {ex.Message}"); }
         try { CheckDisk(result.Warnings); } catch (Exception ex) { _diagnostics.Warn("Preflight", $"Disk check failed: {ex.Message}"); }
+        try { CheckGamePath(result.Warnings); } catch (Exception ex) { _diagnostics.Warn("Preflight", $"Path check failed: {ex.Message}"); }
         try { CheckLastCrash(result.Warnings); } catch (Exception ex) { _diagnostics.Warn("Preflight", $"Crash check failed: {ex.Message}"); }
         return result;
     }
@@ -90,6 +91,23 @@ public sealed class PreflightService
             Severity = "warning",
             Title = "На диске почти не осталось места",
             Message = $"На диске {root} свободно {Gb(freeMb)}. Обновление сборки может не скачаться, а игра — не сохранить настройки. Освободите хотя бы 3 ГБ.",
+        });
+    }
+
+    // A Cyrillic Windows user name puts the whole game under a non-ASCII path, which some natives
+    // (and the embedded browser) can't handle. Moving the game folder fixes it without touching Windows.
+    private void CheckGamePath(List<PreflightWarningDto> warnings)
+    {
+        var gameDir = _pathsService.GameDirectory;
+        if (!GameLocationService.HasNonAscii(gameDir)) return;
+
+        warnings.Add(new PreflightWarningDto
+        {
+            Id = "game_path_non_ascii",
+            Severity = "warning",
+            Title = "В пути к игре есть русские буквы",
+            Message = $"Игра лежит в «{gameDir}». С такими путями некоторые моды и встроенный браузер не запускаются. Если игра падает при запуске — перенесите файлы в папку с латинским названием, например D:\\Games\\VoidRP.",
+            Actions = { Action(0, CrashActionTypes.OpenSettings, "Сменить папку") },
         });
     }
 

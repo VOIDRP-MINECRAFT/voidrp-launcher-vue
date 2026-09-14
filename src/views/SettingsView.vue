@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useLauncherStore } from '../stores/launcher'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useLauncherStore, type GameLocationInfo } from '../stores/launcher'
 import { LAUNCHER_THEMES } from '../theme/themes'
 
 const launcher = useLauncherStore()
@@ -24,6 +24,47 @@ const presets = [
 
 function increase() { memoryMb.value = Math.min(MEMORY_MAX, memoryMb.value + MEMORY_STEP) }
 function decrease() { memoryMb.value = Math.max(MEMORY_MIN, memoryMb.value - MEMORY_STEP) }
+
+// ── Game files location ────────────────────────────────────────────────────
+const location = ref<GameLocationInfo | null>(null)
+const pendingPath = ref<string | null>(null)   // chosen folder awaiting confirmation; '' = back to default
+const moveFiles = ref(true)
+const sizeLoading = ref(false)
+
+function formatGb(bytes: number | null | undefined) {
+  if (bytes == null) return '—'
+  return `${(bytes / 1024 ** 3).toFixed(1)} ГБ`
+}
+
+async function loadLocation(includeSize = false) {
+  if (includeSize) sizeLoading.value = true
+  const info = await launcher.getGameLocation(includeSize)
+  if (info) location.value = info
+  sizeLoading.value = false
+}
+
+async function pickFolder() {
+  const chosen = await launcher.selectDirectory(location.value?.currentRoot || '')
+  if (!chosen) return
+  pendingPath.value = chosen
+  moveFiles.value = true
+  loadLocation(true)
+}
+
+function resetToDefault() {
+  pendingPath.value = ''
+  moveFiles.value = true
+  loadLocation(true)
+}
+
+async function confirmMove() {
+  if (pendingPath.value === null) return
+  const response = await launcher.changeGameLocation(pendingPath.value || null, moveFiles.value)
+  if (response?.ok) pendingPath.value = null
+  loadLocation()
+}
+
+onMounted(() => loadLocation())
 
 const folderActions = [
   { label: 'Логи',   action: () => launcher.openPath(launcher.logsDirectory) },
@@ -155,6 +196,63 @@ const folderActions = [
           class="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
           @click="launcher.installShellUpdate()"
         >Установить обновление</button>
+      </div>
+    </section>
+
+    <!-- Game files location -->
+    <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
+      <p class="text-sm font-semibold">Папка с файлами игры</p>
+      <p class="mt-1 text-xs text-white/45">
+        Моды, ресурсы и Java занимают много места — их можно перенести на другой диск. Путь лучше выбирать латиницей, например D:\Games\VoidRP.
+      </p>
+
+      <div class="mt-3 rounded-[13px] border border-white/8 bg-white/[0.03] px-3.5 py-2.5">
+        <p class="break-all font-mono text-[12px] text-white/75">{{ location?.currentRoot || '…' }}</p>
+        <p class="mt-1 text-[11px] text-white/40">
+          {{ location?.isCustom ? 'Своя папка' : 'Папка по умолчанию' }} · свободно на диске {{ formatGb(location?.freeBytes) }}
+        </p>
+      </div>
+
+      <div v-if="pendingPath !== null" class="mt-3 rounded-[13px] border p-3.5" style="border-color: var(--acc)">
+        <p class="text-[13px] font-semibold">
+          {{ pendingPath ? 'Новая папка:' : 'Вернуть в папку по умолчанию:' }}
+          <span class="break-all font-mono font-normal text-white/80">{{ pendingPath || location?.defaultRoot }}</span>
+        </p>
+        <label class="mt-2 flex cursor-pointer items-center gap-2 text-[12px] text-white/70">
+          <input v-model="moveFiles" type="checkbox" class="accent-[var(--acc)]" />
+          Перенести уже скачанные файлы
+          <span class="text-white/40">({{ sizeLoading ? 'считаем размер…' : formatGb(location?.sizeBytes) }})</span>
+        </label>
+        <p v-if="!moveFiles" class="mt-1 text-[11px] text-white/40">
+          Лаунчер просто начнёт использовать эту папку: если в ней уже есть игра — возьмёт её, иначе скачает сборку заново.
+        </p>
+        <p v-if="launcher.isBusy && launcher.progress.visible" class="mt-2 text-[12px] text-white/60">{{ launcher.progress.details }}</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            class="rounded-[12px] px-4 py-2 text-sm font-semibold btn-acc disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="launcher.isBusy"
+            @click="confirmMove"
+          >{{ launcher.isBusy ? 'Переносим…' : moveFiles ? 'Перенести' : 'Сменить папку' }}</button>
+          <button
+            class="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
+            :disabled="launcher.isBusy"
+            @click="pendingPath = null"
+          >Отмена</button>
+        </div>
+      </div>
+
+      <div v-else class="mt-3 flex flex-wrap gap-2.5">
+        <button
+          class="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
+          :disabled="launcher.isBusy"
+          @click="pickFolder"
+        >Выбрать другую папку</button>
+        <button
+          v-if="location?.isCustom"
+          class="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
+          :disabled="launcher.isBusy"
+          @click="resetToDefault"
+        >Вернуть по умолчанию</button>
       </div>
     </section>
 

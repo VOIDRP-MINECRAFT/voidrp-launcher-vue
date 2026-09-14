@@ -49,6 +49,7 @@ builder.Services.AddSingleton<LocalMinecraftLaunchService>();
 builder.Services.AddSingleton<LauncherStateService>();
 builder.Services.AddSingleton<ServerCatalogService>();
 builder.Services.AddSingleton<CrashHistoryService>();
+builder.Services.AddSingleton<GameLocationService>();
 
 builder.Services.AddSingleton(sp =>
 {
@@ -130,6 +131,12 @@ app.MapPost("/api/servers/select", async (ServerSelectDto dto, ServerCatalogServ
 
 app.MapPost("/api/actions/repair", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.RepairAsync(CancellationToken.None)));
+
+app.MapGet("/api/settings/game-location", (bool? size, LauncherFacadeService facade) =>
+    Results.Ok(facade.GetGameLocation(size == true)));
+
+app.MapPost("/api/settings/game-location", async (GameLocationCommandDto dto, LauncherFacadeService facade) =>
+    Results.Ok(await facade.ChangeGameLocationAsync(dto, CancellationToken.None)));
 
 app.MapGet("/api/preflight", (PreflightService preflight) =>
     Results.Ok(preflight.Run()));

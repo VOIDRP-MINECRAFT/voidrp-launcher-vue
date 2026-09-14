@@ -39,5 +39,9 @@ contextBridge.exposeInMainWorld('desktop', {
 
   openPath(targetPath) {
     return ipcRenderer.invoke('desktop:open-path', targetPath)
+  },
+
+  selectDirectory(defaultPath) {
+    return ipcRenderer.invoke('desktop:select-directory', defaultPath)
   }
 })
