@@ -576,7 +576,7 @@ async function pingCore(): Promise<boolean> {
   }
 }
 
-async function waitForCoreReady(timeoutMs = 20000): Promise<void> {
+async function waitForCoreReady(timeoutMs = 90000): Promise<void> {
   const startedAt = Date.now()
 
   // Race stdout signal against polling fallback

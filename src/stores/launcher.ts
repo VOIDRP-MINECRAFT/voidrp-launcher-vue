@@ -315,6 +315,34 @@ async function describeBootError(error: unknown): Promise<BootError> {
   return { message, hint, report }
 }
 
+// The core is spawned by the main process at the same time the window opens. On a cold start
+// (fresh Windows, slow disk, antivirus scanning the .NET files) it can take many seconds to
+// open its port, so wait for /health instead of failing on the first refused connection.
+async function waitForCore(timeoutMs = 90_000): Promise<void> {
+  const desktop = (window as any)?.desktop
+  const startedAt = Date.now()
+  let lastError = ''
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const res = await fetch(`${API_BASE}/health`, { cache: 'no-store' })
+      if (res.ok) return
+    } catch (e) {
+      lastError = String((e as any)?.message ?? e)
+    }
+    // A core that has already exited will not come up by waiting: report its own error.
+    if (desktop?.getCoreStatus && Date.now() - startedAt > 3000) {
+      try {
+        const st = await desktop.getCoreStatus() as { running?: boolean; lastError?: string }
+        if (st && st.running === false && st.lastError) throw new Error(st.lastError)
+      } catch (e) {
+        if (e instanceof Error && e.message) throw e
+      }
+    }
+    await new Promise((r) => setTimeout(r, 400))
+  }
+  throw new Error(`Ядро не ответило за ${Math.round(timeoutMs / 1000)} с${lastError ? ` (${lastError})` : ''}`)
+}
+
 function sanitizeError(err: unknown): string {
   const raw = String((err as any)?.message ?? err ?? '').trim()
   if (!raw) return 'Неизвестная ошибка.'
@@ -535,6 +563,7 @@ export const useLauncherStore = defineStore('launcher', () => {
         bootError.value = null
         initProgress.value = 10
         state.statusText = 'Подключение к ядру...'
+        await waitForCore()
         const response = await readJson<OperationResponse>('/api/bootstrap')
         stopBootstrapPoll()
         initProgress.value = 55
