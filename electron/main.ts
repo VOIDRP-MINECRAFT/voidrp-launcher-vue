@@ -30,6 +30,8 @@ type CoreStatusPayload = {
   baseUrl: string
   executablePath: string
   lastError: string
+  exitCode: number | null
+  logTail: string[]
 }
 
 type UpdaterStatusPayload = {
@@ -70,6 +72,16 @@ let mainWindow: BrowserWindow | null = null
 let coreProcess: ChildProcessWithoutNullStreams | null = null
 let coreStartPromise: Promise<void> | null = null
 let lastCoreError = ''
+let lastCoreExitCode: number | null = null
+// Last lines the core printed: shown on the splash when it fails, so a player can paste the real reason.
+const coreLogTail: string[] = []
+function pushCoreLog(line: string) {
+  for (const l of line.split(/\r?\n/)) {
+    if (!l.trim()) continue
+    coreLogTail.push(l.length > 400 ? l.slice(0, 400) + '…' : l)
+  }
+  if (coreLogTail.length > 40) coreLogTail.splice(0, coreLogTail.length - 40)
+}
 let coreReadyResolve: (() => void) | null = null
 const coreReadyPromise: Promise<void> = new Promise(resolve => { coreReadyResolve = resolve })
 let shellUpdaterStatus: UpdaterStatusPayload = {
@@ -107,7 +119,9 @@ function getCoreStatus(): CoreStatusPayload {
     pid: coreProcess?.pid ?? null,
     baseUrl: CORE_BASE_URL,
     executablePath: resolveCoreExecutablePath(),
-    lastError: lastCoreError
+    lastError: lastCoreError,
+    exitCode: lastCoreExitCode,
+    logTail: [...coreLogTail]
   }
 }
 
@@ -484,10 +498,13 @@ function startCoreProcess() {
   const executablePath = resolveCoreExecutablePath()
 
   if (!fs.existsSync(executablePath)) {
-    throw new Error(`CoreHost exe not found: ${executablePath}`)
+    // On Windows this is almost always an antivirus quarantining the unsigned core exe.
+    lastCoreError = `CoreHost exe not found: ${executablePath}`
+    throw new Error(lastCoreError)
   }
 
   lastCoreError = ''
+  lastCoreExitCode = null
   logMain(`Starting core: ${executablePath}`)
 
   if (process.platform !== 'win32') {
@@ -511,6 +528,7 @@ function startCoreProcess() {
     const text = chunk.toString().trim()
     if (!text) return
     logMain(`Core stdout: ${text}`)
+    pushCoreLog(text)
     if (coreReadyResolve && text.includes('Now listening on:')) {
       coreReadyResolve()
       coreReadyResolve = null
@@ -521,6 +539,7 @@ function startCoreProcess() {
     const text = chunk.toString().trim()
     if (!text) return
     lastCoreError = text
+    pushCoreLog(text)
     logMain(`Core stderr: ${text}`)
     emitCoreStatus()
   })
@@ -528,8 +547,10 @@ function startCoreProcess() {
   coreProcess.on('exit', (code, signal) => {
     logMain(`Core exited. code=${code ?? 'null'} signal=${signal ?? 'null'}`)
 
+    lastCoreExitCode = code
     if (code !== 0) {
-      lastCoreError = `CoreHost exited with code ${code ?? 'null'}`
+      lastCoreError = `CoreHost exited with code ${code ?? 'null'}${signal ? ` (${signal})` : ''}`
+      pushCoreLog(lastCoreError)
     }
 
     coreProcess = null
@@ -537,7 +558,8 @@ function startCoreProcess() {
   })
 
   coreProcess.on('error', (error) => {
-    lastCoreError = error.message
+    lastCoreError = `Core spawn error: ${error.message}`
+    pushCoreLog(lastCoreError)
     logMain(`Core spawn error: ${error.message}`)
     emitCoreStatus()
   })
@@ -559,12 +581,13 @@ async function waitForCoreReady(timeoutMs = 20000): Promise<void> {
 
   // Race stdout signal against polling fallback
   const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('CoreHost did not become ready in time.')), timeoutMs))
+    setTimeout(() => reject(new Error(lastCoreError || 'CoreHost did not become ready in time.')), timeoutMs))
 
   const pollUntilReady = async () => {
     let delay = 50
     while (true) {
       if (await pingCore()) return
+      if (!coreProcess) throw new Error(lastCoreError || 'CoreHost exited before it became ready.')
       await new Promise(r => setTimeout(r, delay))
       if (delay < 250) delay = Math.min(delay * 2, 250)
       if (Date.now() - startedAt >= timeoutMs) throw new Error('CoreHost did not become ready in time.')

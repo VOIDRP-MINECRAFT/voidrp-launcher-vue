@@ -149,6 +149,8 @@ watchEffect(() => {
           :status-text="launcher.statusText"
           :detail="splashDetail"
           :progress="splashProgress"
+          :error="launcher.bootError"
+          @retry="launcher.initializeApp()"
         />
       </Transition>
     </template>

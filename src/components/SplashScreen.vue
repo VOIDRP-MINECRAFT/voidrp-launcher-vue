@@ -1,5 +1,18 @@
 <script setup lang="ts">
-defineProps<{ statusText: string; detail?: string; progress?: number }>()
+import { ref } from 'vue'
+import type { BootError } from '../stores/launcher'
+
+defineProps<{ statusText: string; detail?: string; progress?: number; error?: BootError | null }>()
+defineEmits<{ retry: [] }>()
+
+const copied = ref(false)
+async function copyReport(report: string) {
+  try {
+    await navigator.clipboard.writeText(report)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch { /* clipboard unavailable */ }
+}
 
 function particleStyle(i: number) {
   // Golden-angle spiral distribution for uniform spread
@@ -102,8 +115,19 @@ function particleStyle(i: number) {
       <p class="logo-sub">Launcher</p>
     </div>
 
+    <!-- Startup failure: the real reason instead of an endless spinner -->
+    <div v-if="error" class="boot-error mt-9">
+      <p class="boot-error__title">Ядро лаунчера не запустилось</p>
+      <p class="boot-error__msg">{{ error.message }}</p>
+      <p class="boot-error__hint">{{ error.hint }}</p>
+      <div class="boot-error__actions">
+        <button type="button" class="boot-btn boot-btn--primary" @click="$emit('retry')">Повторить</button>
+        <button type="button" class="boot-btn" @click="copyReport(error.report)">{{ copied ? 'Скопировано' : 'Скопировать отчёт' }}</button>
+      </div>
+    </div>
+
     <!-- Status -->
-    <div class="mt-9 flex flex-col items-center gap-3">
+    <div v-else class="mt-9 flex flex-col items-center gap-3">
       <p class="status-text">{{ statusText || 'Инициализация...' }}</p>
 
       <!-- Live detail: current file being downloaded -->
@@ -249,6 +273,42 @@ function particleStyle(i: number) {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0);   }
 }
+
+/* ── Startup failure ────────────────────────────────────────── */
+.boot-error {
+  position: relative;
+  z-index: 1;
+  width: min(460px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.boot-error__title { font-size: 15px; font-weight: 700; color: #fff; }
+.boot-error__msg {
+  font-size: 12px;
+  color: #fca5a5;
+  max-height: 72px;
+  overflow: auto;
+  word-break: break-word;
+  user-select: text;
+}
+.boot-error__hint { font-size: 12px; line-height: 1.5; color: rgba(255,255,255,0.65); }
+.boot-error__actions { display: flex; gap: 8px; margin-top: 6px; }
+.boot-btn {
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  cursor: pointer;
+}
+.boot-btn:hover { background: rgba(255,255,255,0.14); }
+.boot-btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.boot-btn--primary { background: var(--acc); border-color: transparent; }
 
 /* ── Status ─────────────────────────────────────────────────── */
 .status-text {

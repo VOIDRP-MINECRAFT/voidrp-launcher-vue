@@ -284,6 +284,37 @@ function toastId() {
 }
 
 // Извлекает читаемое сообщение об ошибке, скрывая технические детали от пользователя.
+export type BootError = { message: string; hint: string; report: string }
+
+type CoreStatus = { running?: boolean; pid?: number | null; executablePath?: string; lastError?: string; exitCode?: number | null; logTail?: string[] }
+
+// Turn a failed start into something a player can act on and paste to support.
+async function describeBootError(error: unknown): Promise<BootError> {
+  const message = sanitizeError(error)
+  let core: CoreStatus = {}
+  try {
+    core = ((window as any)?.desktop?.getCoreStatus ? await (window as any).desktop.getCoreStatus() : {}) as CoreStatus
+  } catch { /* status is best-effort */ }
+  const text = `${message}\n${core.lastError ?? ''}\n${(core.logTail ?? []).join('\n')}`
+  let hint = 'Перезапусти лаунчер. Если не помогло — нажми «Скопировать отчёт» и отправь его в поддержку.'
+  if (/not found|ENOENT/i.test(text)) {
+    hint = 'Файл ядра лаунчера пропал — обычно его удаляет антивирус. Открой «Безопасность Windows» → «Журнал защиты», восстанови VoidRpLauncher.CoreHost.exe и добавь папку лаунчера в исключения.'
+  } else if (/EACCES|EPERM|UNKNOWN|blocked|заблок/i.test(text)) {
+    hint = 'Windows не дала запустить ядро лаунчера. Проверь «Безопасность Windows» → «Журнал защиты» и «Управление приложениями» (Smart App Control), разреши VoidRpLauncher.CoreHost.exe.'
+  } else if (/38765|address already in use|access permissions|10013|10048/i.test(text)) {
+    hint = 'Порт 38765 занят или зарезервирован Windows (Hyper-V/WSL). Закрой другие копии лаунчера; если не помогло — перезагрузи ПК.'
+  }
+  const report = [
+    `Ошибка: ${message}`,
+    core.lastError ? `Ядро: ${core.lastError}` : '',
+    `Запущено: ${core.running ? 'да' : 'нет'}, pid ${core.pid ?? '-'}, код выхода ${core.exitCode ?? '-'}`,
+    core.executablePath ? `Путь: ${core.executablePath}` : '',
+    `Система: ${navigator.userAgent}`,
+    core.logTail?.length ? `\nЛог ядра:\n${core.logTail.join('\n')}` : '',
+  ].filter(Boolean).join('\n')
+  return { message, hint, report }
+}
+
 function sanitizeError(err: unknown): string {
   const raw = String((err as any)?.message ?? err ?? '').trim()
   if (!raw) return 'Неизвестная ошибка.'
@@ -373,6 +404,8 @@ export const useLauncherStore = defineStore('launcher', () => {
   const mods = reactive<{ list: ModInfo[]; loading: boolean }>({ list: [], loading: false })
   const bpProfile = ref<BattlePassProfile | null>(null)
   const initProgress = ref(0)
+  // Set when the local core could not be reached at startup: the splash shows it instead of spinning forever.
+  const bootError = ref<BootError | null>(null)
   const serverStatus = ref<ServerStatus | null>(null)
   // Selected visual theme (client-only preference, persisted to localStorage).
   const themeId = ref<string>(loadThemeId() || DEFAULT_THEME_ID)
@@ -499,6 +532,7 @@ export const useLauncherStore = defineStore('launcher', () => {
         if (bootstrapPoll != null) { window.clearInterval(bootstrapPoll); bootstrapPoll = null }
       }
       try {
+        bootError.value = null
         initProgress.value = 10
         state.statusText = 'Подключение к ядру...'
         const response = await readJson<OperationResponse>('/api/bootstrap')
@@ -534,7 +568,7 @@ export const useLauncherStore = defineStore('launcher', () => {
       } catch (error: unknown) {
         stopBootstrapPoll()
         initProgress.value = 0
-        pushToast('error', 'Ядро лаунчера недоступно', sanitizeError(error) || 'Не удалось связаться с локальным ядром.')
+        bootError.value = await describeBootError(error)
       }
     })()
     try {
@@ -967,6 +1001,7 @@ export const useLauncherStore = defineStore('launcher', () => {
   })
 
   return {
+    bootError,
     initialized: computed(() => state.initialized),
     isBusy: computed(() => state.isBusy),
     isAuthenticated: computed(() => state.isAuthenticated),
