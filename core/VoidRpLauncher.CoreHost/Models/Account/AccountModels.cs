@@ -65,6 +65,8 @@ public sealed class IssuePlayTicketResponseDto
     [JsonPropertyName("expires_at")] public DateTimeOffset ExpiresAt { get; set; }
     [JsonPropertyName("minecraft_nickname")] public string MinecraftNickname { get; set; } = string.Empty;
     [JsonPropertyName("ttl_seconds")] public int TtlSeconds { get; set; }
+    /// <summary>Label a plugin server expects in front of its hostname (vanilla clients carry the ticket that way).</summary>
+    [JsonPropertyName("hostname_label")] public string? HostnameLabel { get; set; }
 }
 
 public sealed class UserReadDto

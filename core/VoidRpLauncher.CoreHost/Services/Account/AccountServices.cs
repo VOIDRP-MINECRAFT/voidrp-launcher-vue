@@ -623,7 +623,7 @@ public sealed class AuthenticatedLaunchService
         var launcherProof = LauncherProof.Compute(playTicket.Ticket);
         await _playTicketStore.SaveAsync(new LauncherPlayTicketEnvelope { Ticket = playTicket.Ticket, MinecraftNickname = playTicket.MinecraftNickname, ExpiresAtUtc = playTicket.ExpiresAt, Source = "VoidRP Launcher", LauncherProof = launcherProof }, cancellationToken);
         progress?.Report(new LaunchProgressInfo { Stage = "Авторизация", Details = $"Используем аккаунт {nickname}. Ticket сохранён во временный state-файл.", Percent = 15 });
-        var process = await _localMinecraftLaunchService.LaunchAsync(nickname, manifest, maximumRamMb);
+        var process = await _localMinecraftLaunchService.LaunchAsync(nickname, manifest, maximumRamMb, playTicket.HostnameLabel);
         progress?.Report(new LaunchProgressInfo { Stage = "Запуск", Details = "Minecraft запущен.", Percent = 100 });
         _diagnostics.Info("Launch", $"Minecraft launched for {nickname} with {maximumRamMb} MB RAM.");
         return process;

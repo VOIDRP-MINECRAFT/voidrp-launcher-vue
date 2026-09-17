@@ -1369,7 +1369,7 @@ public sealed class LocalMinecraftLaunchService
         _serverCatalog = serverCatalog;
     }
 
-    public async Task<Process> LaunchAsync(string nickname, LauncherManifest manifest, int maximumRamMb)
+    public async Task<Process> LaunchAsync(string nickname, LauncherManifest manifest, int maximumRamMb, string? ticketHostLabel = null)
     {
         if (string.IsNullOrWhiteSpace(nickname))
             throw new ArgumentException("Nickname is empty.", nameof(nickname));
@@ -1418,9 +1418,22 @@ public sealed class LocalMinecraftLaunchService
         var selected = _serverCatalog.GetSelectedServer();
         if (selected is not null && !string.IsNullOrWhiteSpace(selected.Host))
         {
-            launchOption.ServerIp = selected.Host;
+            // A plugin server has no mod to hand the play ticket to, so the launcher
+            // carries it in the address: "<label>.<host>". The server reads the label
+            // from the handshake and lets the player straight in. Needs a wildcard DNS
+            // record for the server's domain; without the label we connect normally and
+            // the player just types their password.
+            // Only plugin servers read the label: a modded server gets the ticket from
+            // the auth-bridge mod, and prefixing its hostname would break the connection
+            // wherever no wildcard DNS record exists.
+            var pluginServer = string.Equals(manifest.Loader, "vanilla", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(manifest.Loader, "paper", StringComparison.OrdinalIgnoreCase);
+            var host = pluginServer && !string.IsNullOrWhiteSpace(ticketHostLabel)
+                ? $"{ticketHostLabel}.{selected.Host}"
+                : selected.Host;
+            launchOption.ServerIp = host;
             launchOption.ServerPort = selected.Port > 0 ? selected.Port : 25565;
-            _diagnostics.Info("Launch", $"Quick-connect to {selected.Host}:{launchOption.ServerPort} ({selected.Slug}).");
+            _diagnostics.Info("Launch", $"Quick-connect to {host}:{launchOption.ServerPort} ({selected.Slug}).");
         }
 
         // GetVersionAsync reads from the local version JSON (which we keep in sync via pack manifest).
