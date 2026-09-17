@@ -145,6 +145,35 @@ public sealed class LauncherAccountApiClient
         return await ReadJsonAsync<SimpleResponseDto>(response, cancellationToken);
     }
 
+    // Consents are passed through as raw JSON: the renderer reads the backend shape
+    // (missing / distribution_answered / distribution) directly.
+    public async Task<string> GetConsentsAsync(string accessToken, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "me/consents");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        return await ReadRawJsonAsync(response, cancellationToken);
+    }
+
+    public async Task<string> UpdateConsentsAsync(string accessToken, string bodyJson, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "me/consents");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Content = new StringContent(bodyJson, System.Text.Encoding.UTF8, "application/json");
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        return await ReadRawJsonAsync(response, cancellationToken);
+    }
+
+    private static async Task<string> ReadRawJsonAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.IsSuccessStatusCode) return body;
+        var userMessage = ExtractUserMessage(body) ?? $"Ошибка сервера ({(int)response.StatusCode})";
+        if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            throw new LauncherAuthException(userMessage);
+        throw new InvalidOperationException(userMessage);
+    }
+
     public async Task<SimpleResponseDto> PostPlayerFeedbackAsync(string accessToken, string type, string title, string? body, string? serverSlug = null, CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, "player-feedback/");
@@ -484,6 +513,29 @@ public sealed class LauncherAuthSessionService
     {
         if (_snapshot is null || string.IsNullOrWhiteSpace(_snapshot.AccessToken)) throw new InvalidOperationException("Launcher user is not authenticated");
         return await _apiClient.PostPlayerFeedbackAsync(_snapshot.AccessToken, type, title, body, _serverCatalog.GetSelectedSlug(), cancellationToken);
+    }
+
+    public Task<string> GetConsentsAsync(CancellationToken cancellationToken = default)
+        => WithFreshTokenAsync(token => _apiClient.GetConsentsAsync(token, cancellationToken), cancellationToken);
+
+    public Task<string> UpdateConsentsAsync(string bodyJson, CancellationToken cancellationToken = default)
+        => WithFreshTokenAsync(token => _apiClient.UpdateConsentsAsync(token, bodyJson, cancellationToken), cancellationToken);
+
+    // The access token lives ~15 minutes while the launcher stays open for hours: on an auth error
+    // refresh the session once and repeat the call.
+    private async Task<T> WithFreshTokenAsync<T>(Func<string, Task<T>> call, CancellationToken cancellationToken)
+    {
+        if (_snapshot is null || string.IsNullOrWhiteSpace(_snapshot.AccessToken)) throw new InvalidOperationException("Launcher user is not authenticated");
+        try
+        {
+            return await call(_snapshot.AccessToken);
+        }
+        catch (LauncherAuthException)
+        {
+            var restored = await TryRestoreAsync(cancellationToken);
+            if (restored is null || string.IsNullOrWhiteSpace(restored.AccessToken)) throw;
+            return await call(restored.AccessToken);
+        }
     }
 
     public async Task LogoutAsync(CancellationToken cancellationToken = default)

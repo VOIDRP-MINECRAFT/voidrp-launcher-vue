@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { DEFAULT_THEME_ID, loadThemeId, saveThemeId } from '../theme/themes'
 
@@ -397,6 +397,18 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+export interface ConsentStatus {
+  missing: string[]
+  distribution_answered: boolean
+  distribution: { profile: boolean; map: boolean; purchases: boolean }
+}
+
+export interface ConsentUpdate {
+  accept_offer?: boolean
+  accept_personal_data?: boolean
+  distribution?: { profile: boolean; map: boolean; purchases: boolean }
+}
+
 interface ServerStatus {
   online: boolean
   playersOnline: number
@@ -765,6 +777,43 @@ export const useLauncherStore = defineStore('launcher', () => {
     }
   }
 
+  // ── Consents ────────────────────────────────────────────────────────────
+  // Accounts that haven't accepted the current offer and personal data consent see a blocking
+  // dialog right after login; the backend also refuses a play ticket until then. `consents`
+  // stays null while unknown (not logged in, or the backend unreachable) — never blocks then.
+  const consents = ref<ConsentStatus | null>(null)
+
+  async function loadConsents() {
+    if (!state.isAuthenticated) {
+      consents.value = null
+      return null
+    }
+    try {
+      consents.value = await readJson<ConsentStatus>('/api/consents')
+    } catch {
+      // Offline or backend down: don't lock the player out of the launcher over it.
+    }
+    return consents.value
+  }
+
+  async function submitConsents(payload: ConsentUpdate) {
+    const response = await fetch(`${API_BASE}/api/consents`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await response.json().catch(() => ({})) as ConsentStatus & { error?: string }
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
+    consents.value = data
+    return data
+  }
+
+  watch(() => state.isAuthenticated, (value) => {
+    if (value) void loadConsents()
+    else consents.value = null
+  })
+
   // ── Pre-launch check ────────────────────────────────────────────────────
   // "Play" first asks CoreHost for warnings (memory, disk, unresolved crash). If any are
   // left after the player's mutes, a modal shows them; the player can fix or launch anyway.
@@ -773,6 +822,9 @@ export const useLauncherStore = defineStore('launcher', () => {
 
   async function requestPlay() {
     if (state.isBusy) return null
+    // Re-check before launching: the dialog opens instead of a server-side refusal.
+    const current = await loadConsents()
+    if (current?.missing?.length) return null
     let warnings: PreflightWarning[] = []
     try {
       const result = await readJson<{ warnings: PreflightWarning[] }>('/api/preflight')
@@ -1034,6 +1086,9 @@ export const useLauncherStore = defineStore('launcher', () => {
     initialized: computed(() => state.initialized),
     isBusy: computed(() => state.isBusy),
     isAuthenticated: computed(() => state.isAuthenticated),
+    consents,
+    loadConsents,
+    submitConsents,
     statusText: computed(() => state.statusText),
     launcherVersionText: computed(() => state.launcherVersionText),
     accountPrimaryText: computed(() => state.accountPrimaryText),

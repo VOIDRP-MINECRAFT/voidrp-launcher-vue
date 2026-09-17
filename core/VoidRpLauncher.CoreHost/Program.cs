@@ -215,4 +215,32 @@ app.MapPost("/api/player-feedback", async (PlayerFeedbackCommandDto dto, Launche
     }
 });
 
+// Required consents (offer + personal data) and the choice of what is shown publicly. The
+// renderer blocks the app behind a dialog until the required ones are accepted.
+app.MapGet("/api/consents", async (LauncherAuthSessionService auth) =>
+{
+    try
+    {
+        return Results.Content(await auth.GetConsentsAsync(CancellationToken.None), "application/json");
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: ex is LauncherAuthException ? 401 : 502);
+    }
+});
+
+app.MapPost("/api/consents", async (HttpRequest request, LauncherAuthSessionService auth) =>
+{
+    try
+    {
+        using var reader = new StreamReader(request.Body);
+        var body = await reader.ReadToEndAsync();
+        return Results.Content(await auth.UpdateConsentsAsync(body, CancellationToken.None), "application/json");
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: ex is LauncherAuthException ? 401 : 422);
+    }
+});
+
 app.Run();

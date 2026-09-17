@@ -5,6 +5,7 @@ import { useLauncherStore } from './stores/launcher'
 import { getTheme } from './theme/themes'
 import ToastHost from './components/ToastHost.vue'
 import CrashModal from './components/CrashModal.vue'
+import ConsentModal from './components/ConsentModal.vue'
 import PreflightModal from './components/PreflightModal.vue'
 import SplashScreen from './components/SplashScreen.vue'
 import UpdateScreen from './components/UpdateScreen.vue'
@@ -40,7 +41,15 @@ onMounted(() => {
   void launcher.initializeApp()
 })
 
+// A player who accepted the documents on the site while the launcher was open gets the
+// dialog dismissed as soon as they come back to the window.
+function recheckConsents() {
+  if (launcher.consents?.missing?.length) void launcher.loadConsents()
+}
+window.addEventListener('focus', recheckConsents)
+
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', recheckConsents)
   offUpdater?.()
   if (!isUpdateMode) launcher.dispose()
 })
@@ -140,6 +149,7 @@ watchEffect(() => {
         <RouterView />
         <PreflightModal v-if="launcher.isAuthenticated" />
         <CrashModal v-if="launcher.isAuthenticated" />
+        <ConsentModal v-if="launcher.initialized && launcher.isAuthenticated" />
         <ToastHost />
       </div>
 
