@@ -12,14 +12,6 @@ namespace VoidRpLauncher.CoreHost.Services;
 
 public sealed class LauncherFacadeService
 {
-    private static readonly string[] ConfigPathsToSync =
-    {
-        "options.txt",
-        "config/sodium-options.json",
-        "config/sodium-extra-options.json",
-        "config/sodium-extra.json",
-    };
-
     private readonly AppEndpointsOptions _endpoints;
     private readonly ManifestService _manifestService;
     private readonly FileSyncService _fileSyncService;
@@ -36,6 +28,7 @@ public sealed class LauncherFacadeService
     private readonly CrashHistoryService _crashHistory;
     private readonly CrashRuleService _crashRules;
     private readonly GameLocationService _gameLocation;
+    private readonly PlayerConfigSyncService _configSync;
     // Games started by this launcher that have not exited yet (moving files under a running game breaks it).
     private int _runningGames;
     private readonly SemaphoreSlim _operationLock = new(1, 1);
@@ -57,9 +50,11 @@ public sealed class LauncherFacadeService
         ServerCatalogService serverCatalog,
         CrashHistoryService crashHistory,
         CrashRuleService crashRules,
-        GameLocationService gameLocation)
+        GameLocationService gameLocation,
+        PlayerConfigSyncService configSync)
     {
         _gameLocation = gameLocation;
+        _configSync = configSync;
         _crashHistory = crashHistory;
         _crashRules = crashRules;
         _endpoints = endpoints;
@@ -303,9 +298,10 @@ public sealed class LauncherFacadeService
 
                 await _fileSyncService.SyncAsync(manifest, (IReadOnlySet<string>?)disabledMods, syncProgress, cancellationToken);
 
-                // Restore per-account config files from server before launching
-                if (_authSessionService.IsAuthenticated)
-                    await RestoreConfigFilesAsync(cancellationToken);
+                // The player's own settings — keys, graphics, sound — before launching. This
+                // both restores what the account holds and saves anything changed on disk
+                // since, which is what a game killed without a clean exit leaves behind.
+                await _configSync.RestoreAsync(cancellationToken);
 
                 // Kill any jcef_helper.exe processes left from a previous MCEF/CEF session.
                 // These lock CEF binary files (e.g. chrome_100_percent.pak), preventing MCEF
@@ -579,58 +575,14 @@ public sealed class LauncherFacadeService
         }
     }
 
-    private async Task RestoreConfigFilesAsync(CancellationToken cancellationToken)
-    {
-        foreach (var configPath in ConfigPathsToSync)
-        {
-            try
-            {
-                var fileDto = await _authSessionService.GetConfigFileAsync(configPath, cancellationToken);
-                if (!fileDto.Found || string.IsNullOrWhiteSpace(fileDto.ContentB64)) continue;
-
-                var localPath = System.IO.Path.Combine(
-                    _pathsService.GameDirectory,
-                    configPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
-                var dir = System.IO.Path.GetDirectoryName(localPath);
-                if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-                await File.WriteAllBytesAsync(localPath, Convert.FromBase64String(fileDto.ContentB64), cancellationToken);
-                _diagnostics.Info("Config", $"Restored per-account config: {configPath}");
-            }
-            catch (Exception ex)
-            {
-                _diagnostics.Warn("Config", $"Failed to restore config '{configPath}': {ex.Message}");
-            }
-        }
-    }
-
     private async Task WatchGameAndUploadConfigsAsync(Process process, DateTime gameStartedAt)
     {
         try
         {
             await process.WaitForExitAsync();
             var exitCode = process.ExitCode;
-            _diagnostics.Info("Config", $"Game exited (code {exitCode}). Uploading per-account config files...");
-
-            foreach (var configPath in ConfigPathsToSync)
-            {
-                var localPath = System.IO.Path.Combine(
-                    _pathsService.GameDirectory,
-                    configPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
-                if (!File.Exists(localPath)) continue;
-
-                try
-                {
-                    var bytes = await File.ReadAllBytesAsync(localPath);
-                    var contentB64 = Convert.ToBase64String(bytes);
-                    if (contentB64.Length > 512 * 1024) continue;
-                    await _authSessionService.SaveConfigFileAsync(configPath, contentB64, CancellationToken.None);
-                    _diagnostics.Info("Config", $"Uploaded per-account config: {configPath}");
-                }
-                catch (Exception ex)
-                {
-                    _diagnostics.Warn("Config", $"Failed to upload config '{configPath}': {ex.Message}");
-                }
-            }
+            _diagnostics.Info("Config", $"Game exited (code {exitCode}). Saving the player's settings...");
+            await _configSync.UploadAsync(CancellationToken.None);
 
             // Exit code -1073740791 (0xC0000409) = MCEF/jcef_helper.exe crash (STATUS_STACK_BUFFER_OVERRUN).
             // This is a known CEF crash — do not spam the backend with these reports.
