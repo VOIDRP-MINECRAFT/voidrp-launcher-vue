@@ -1,7 +1,6 @@
-# 🚀 VoidRP Launcher
+<p align="center"><img src=".github/assets/banner.jpg" alt="VoidRP Launcher" width="100%"></p>
 
-> Десктопный лаунчер VoidRP: вход в аккаунт, выбор сервера, установка и обновление модпака, Java нужной версии,
-> вход в игру по одноразовому билету и помощь, если игра упала.
+<div align="center">
 
 ![Electron](https://img.shields.io/badge/Electron-Vue%203%20%2B%20TS-47848F?logo=electron&logoColor=white)
 ![.NET](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet&logoColor=white)
@@ -10,7 +9,35 @@
 [![Build](https://github.com/VOIDRP-MINECRAFT/voidrp-launcher-vue/actions/workflows/build.yml/badge.svg)](https://github.com/VOIDRP-MINECRAFT/voidrp-launcher-vue/actions/workflows/build.yml)
 ![License](https://img.shields.io/badge/license-proprietary-red)
 
+</div>
+
+> Десктопный лаунчер VoidRP: вход в аккаунт, выбор сервера, установка и обновление модпака, Java нужной версии,
+> вход в игру по одноразовому билету и помощь, если игра упала.
+
 **[📥 Скачать лаунчер](https://void-rp.ru/download-launcher)**
+
+---
+
+## 📸 Как это выглядит
+
+<p align="center"><img src=".github/assets/screenshots/tour.gif" alt="Вход, выбор сервера, главная, государство, рейтинг и настройки по очереди" width="100%"></p>
+
+<table>
+<tr>
+<td width="50%"><img src=".github/assets/screenshots/login.jpg" alt="Вход аккаунтом сайта"><br><sub>Вход аккаунтом сайта</sub></td>
+<td width="50%"><img src=".github/assets/screenshots/servers.jpg" alt="Выбор сервера"><br><sub>Выбор сервера</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src=".github/assets/screenshots/home.jpg" alt="Главная: сервер, онлайн, «Играть»"><br><sub>Главная: сервер, онлайн, «Играть»</sub></td>
+<td width="50%"><img src=".github/assets/screenshots/nation.jpg" alt="Государство и личная статистика"><br><sub>Государство и личная статистика</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src=".github/assets/screenshots/leaderboard.jpg" alt="Рейтинг эпох прогрессии"><br><sub>Рейтинг эпох прогрессии</sub></td>
+<td width="50%"><img src=".github/assets/screenshots/settings.jpg" alt="Темы, память, обновления"><br><sub>Темы, память, обновления</sub></td>
+</tr>
+</table>
+
+<sub>Рендерер снят в браузере: ответы ядра CoreHost и API подставлены демо-данными (ники и цифры вымышлены).</sub>
 
 ---
 
