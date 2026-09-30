@@ -1423,12 +1423,11 @@ public sealed class LocalMinecraftLaunchService
             // from the handshake and lets the player straight in. Needs a wildcard DNS
             // record for the server's domain; without the label we connect normally and
             // the player just types their password.
-            // Only plugin servers read the label: a modded server gets the ticket from
-            // the auth-bridge mod, and prefixing its hostname would break the connection
-            // wherever no wildcard DNS record exists.
-            var pluginServer = string.Equals(manifest.Loader, "vanilla", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(manifest.Loader, "paper", StringComparison.OrdinalIgnoreCase);
-            var host = pluginServer && !string.IsNullOrWhiteSpace(ticketHostLabel)
+            // Only where the server says so (game_servers.ticket_hostname): the prefix needs a
+            // wildcard DNS record, and a partner's domain without one would be unreachable.
+            // Whether the client pack is vanilla or modded does not decide it.
+            var useLabel = selected.TicketHostname;
+            var host = useLabel && !string.IsNullOrWhiteSpace(ticketHostLabel)
                 ? $"{ticketHostLabel}.{selected.Host}"
                 : selected.Host;
             launchOption.ServerIp = host;

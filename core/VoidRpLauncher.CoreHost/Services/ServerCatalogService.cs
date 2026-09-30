@@ -296,6 +296,10 @@ public sealed class GameServerDto
     /// <summary>The signed-in account may play here despite maintenance
     /// (servers.maintenance.join on this server, or a platform admin).</summary>
     public bool CanJoinMaintenance { get; set; }
+    /// <summary>The server reads the play ticket from the connect address
+    /// ("&lt;label&gt;.&lt;host&gt;"): its domain has a wildcard DNS record. Off → connect to the
+    /// host as is (the server matches the ticket by nickname and address).</summary>
+    public bool TicketHostname { get; set; }
     public bool IsDefault { get; set; }
     /// <summary>Server visible only to staff — the backend already filtered it
     /// out for everyone else, so a true value just drives the "🔒" badge.</summary>
