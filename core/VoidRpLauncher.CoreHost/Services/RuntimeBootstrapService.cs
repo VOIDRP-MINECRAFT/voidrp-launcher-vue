@@ -75,7 +75,11 @@ public sealed class RuntimeBootstrapService
             {
                 var stampPath = Path.Combine(_pathsService.ServerStateDirectory, "runtime.stamp");
                 var fingerprint = ComputeManifestFingerprint(manifest);
-                if (File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == fingerprint)
+                // The stamp only says the runtime was synced once; files may have gone since
+                // (deleted by hand, an antivirus, a cleanup). A missing asset leaves the game
+                // on a black screen, so check every file is still there before trusting it.
+                if (File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == fingerprint
+                    && AllRuntimeFilesPresent(manifest))
                 {
                     _diagnostics.Info("Runtime", "Runtime stamp matches manifest fingerprint — skipping file sync.");
                     progress?.Invoke("Java runtime готов.", 100);
@@ -101,6 +105,21 @@ public sealed class RuntimeBootstrapService
         {
             _runtimeLock.Release();
         }
+    }
+
+    private bool AllRuntimeFilesPresent(RuntimeManifestPayload manifest)
+    {
+        foreach (var entry in manifest.Files)
+        {
+            var relativePath = NormalizeRelativePath(entry.Path);
+            var localPath = Path.Combine(ResolveTargetBaseDirectory(relativePath), relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(localPath))
+            {
+                _diagnostics.Warn("Runtime", $"Runtime file missing, re-syncing: {relativePath}");
+                return false;
+            }
+        }
+        return true;
     }
 
     private static string ComputeManifestFingerprint(RuntimeManifestPayload manifest)
