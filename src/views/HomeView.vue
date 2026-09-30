@@ -16,8 +16,10 @@ const bgStyle = computed(() => {
 
 const online = computed(() => activeServer.value?.status?.online ?? null)
 const maintenance = computed(() => activeServer.value?.maintenance ?? false)
-// Тех. работы блокируют запуск для всех, кроме админов; офлайн — для всех.
-const maintenanceBlocks = computed(() => maintenance.value && !launcher.accountIsAdmin)
+// Тех. работы блокируют запуск для всех, кроме админов и тех, у кого есть право входа
+// на этот сервер во время тех. работ; офлайн — для всех.
+const maintenanceBlocks = computed(() =>
+  maintenance.value && !launcher.accountIsAdmin && !activeServer.value?.canJoinMaintenance)
 // (online === null means status unknown/loading — still allow.)
 const canPlay = computed(() => !launcher.isBusy && online.value !== false && !maintenanceBlocks.value)
 const playLabel = computed(() => {

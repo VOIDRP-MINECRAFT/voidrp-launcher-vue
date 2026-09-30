@@ -429,6 +429,8 @@ export interface GameServer {
   maxPlayers: number
   whitelistMode: string
   maintenance: boolean
+  // Аккаунт может играть здесь несмотря на тех. работы (право servers.maintenance.join).
+  canJoinMaintenance?: boolean
   isDefault: boolean
   staffOnly?: boolean
   mapUrl?: string | null

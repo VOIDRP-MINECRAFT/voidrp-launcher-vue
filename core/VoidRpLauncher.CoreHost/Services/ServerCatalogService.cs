@@ -293,6 +293,9 @@ public sealed class GameServerDto
     public int MaxPlayers { get; set; }
     public string WhitelistMode { get; set; } = "public";
     public bool Maintenance { get; set; }
+    /// <summary>The signed-in account may play here despite maintenance
+    /// (servers.maintenance.join on this server, or a platform admin).</summary>
+    public bool CanJoinMaintenance { get; set; }
     public bool IsDefault { get; set; }
     /// <summary>Server visible only to staff — the backend already filtered it
     /// out for everyone else, so a true value just drives the "🔒" badge.</summary>
