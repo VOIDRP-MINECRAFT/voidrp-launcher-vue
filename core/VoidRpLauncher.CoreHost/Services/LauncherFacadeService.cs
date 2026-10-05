@@ -493,9 +493,14 @@ public sealed class LauncherFacadeService
         var key = entry is null ? rel : ModPrefKey(entry);
         var settings = _settingsService.Load();
         settings.DisabledMods.RemoveAll(m =>
-            string.Equals(m, rel, StringComparison.OrdinalIgnoreCase) || string.Equals(m, key, StringComparison.OrdinalIgnoreCase));
+        {
+            var k = m.StartsWith(EnabledPrefMarker) ? m[EnabledPrefMarker.Length..] : m;
+            return string.Equals(k, rel, StringComparison.OrdinalIgnoreCase) || string.Equals(k, key, StringComparison.OrdinalIgnoreCase);
+        });
         if (!enabled)
             settings.DisabledMods.Add(key);
+        else if (entry is { DefaultEnabled: false })
+            settings.DisabledMods.Add(EnabledPrefMarker + key);   // off by default: remember the opt-in
 
         _settingsService.Save(settings);
 
@@ -518,6 +523,11 @@ public sealed class LauncherFacadeService
     // otherwise (older manifests) as the relative jar path.
     private const string ModIdPrefKeyPrefix = "id:";
 
+    // A mod that is off by default (manifest defaultEnabled=false) and the player turned on is
+    // stored in the same list as "+<key>". Launchers before this never match such an entry,
+    // so it is harmless to them, and the backend keeps the list as plain strings.
+    private const string EnabledPrefMarker = "+";
+
     private static string NormalizeModPath(string path) => (path ?? string.Empty).Replace('\\', '/').Trim('/');
 
     private static string ModPrefKey(LauncherManifestFile file)
@@ -525,13 +535,22 @@ public sealed class LauncherFacadeService
             ? NormalizeModPath(file.Path)
             : ModIdPrefKeyPrefix + file.ModId.Trim().ToLowerInvariant();
 
-    private static bool IsModDisabled(LauncherManifestFile file, IReadOnlySet<string> disabled)
-        => disabled.Contains(NormalizeModPath(file.Path)) || disabled.Contains(ModPrefKey(file));
+    private static bool IsModDisabled(LauncherManifestFile file, IReadOnlySet<string> prefs)
+    {
+        var path = NormalizeModPath(file.Path);
+        var key = ModPrefKey(file);
+        if (prefs.Contains(path) || prefs.Contains(key))
+            return true;
+        if (file.DefaultEnabled)
+            return false;
+        // Off by default: disabled unless the player turned it on.
+        return !(prefs.Contains(EnabledPrefMarker + path) || prefs.Contains(EnabledPrefMarker + key));
+    }
 
     private static HashSet<string>? ResolveDisabledModPaths(LauncherManifest manifest, IEnumerable<string> disabledPrefs)
     {
         var disabled = new HashSet<string>(disabledPrefs, StringComparer.OrdinalIgnoreCase);
-        if (disabled.Count == 0) return null;
+        if (disabled.Count == 0 && manifest.Files.All(f => f.DefaultEnabled)) return null;
 
         return manifest.Files
             .Where(f => f.Optional && !f.Required && IsModDisabled(f, disabled))
@@ -545,12 +564,15 @@ public sealed class LauncherFacadeService
         var changed = false;
         for (var i = 0; i < settings.DisabledMods.Count; i++)
         {
+            var entry = settings.DisabledMods[i];
+            var marker = entry.StartsWith(EnabledPrefMarker) ? EnabledPrefMarker : string.Empty;
+            var stored = entry[marker.Length..];
             var file = manifest.Files.FirstOrDefault(f =>
                 !string.IsNullOrWhiteSpace(f.ModId) &&
-                string.Equals(NormalizeModPath(f.Path), NormalizeModPath(settings.DisabledMods[i]), StringComparison.OrdinalIgnoreCase));
+                string.Equals(NormalizeModPath(f.Path), NormalizeModPath(stored), StringComparison.OrdinalIgnoreCase));
             if (file is null) continue;
 
-            settings.DisabledMods[i] = ModPrefKey(file);
+            settings.DisabledMods[i] = marker + ModPrefKey(file);
             changed = true;
         }
 

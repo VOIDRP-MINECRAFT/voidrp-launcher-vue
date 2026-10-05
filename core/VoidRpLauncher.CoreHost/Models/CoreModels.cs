@@ -34,6 +34,9 @@ public sealed class LauncherManifestFile
     public bool Managed { get; set; }
     public bool Optional { get; set; }
     public bool Required { get; set; }
+    // Optional mod only: installed for a player who has not chosen yet. False → the player
+    // turns it on in the mods list. Absent in older manifests, hence true by default.
+    public bool DefaultEnabled { get; set; } = true;
     // Mod id from the jar's neoforge.mods.toml (optional mods only). Lets a player's "disabled"
     // choice survive a version bump, which changes the file name.
     public string ModId { get; set; } = string.Empty;
