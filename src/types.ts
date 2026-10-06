@@ -78,6 +78,8 @@ export interface LauncherDashboardDto {
   playerStats: LauncherDashboardPlayerStatsDto
   recentActivity: LauncherDashboardActivityDto[]
   walletBalance: number
+  telegramLinked?: boolean
+  telegramBotUrl?: string
 }
 
 export interface LauncherStateDto {

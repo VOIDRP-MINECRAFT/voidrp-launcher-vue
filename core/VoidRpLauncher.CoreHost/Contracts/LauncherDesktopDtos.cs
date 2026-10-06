@@ -86,6 +86,9 @@ public sealed class LauncherDashboardDto
     public LauncherDashboardPlayerStatsDto PlayerStats { get; set; } = new();
     public List<LauncherDashboardActivityDto> RecentActivity { get; set; } = new();
     public double WalletBalance { get; set; }
+    // Not linked yet: the overview shows a «link Telegram» card (bonus + reminders).
+    public bool TelegramLinked { get; set; } = true;
+    public string TelegramBotUrl { get; set; } = "https://t.me/voidrp_bot?start=link";
 }
 
 public sealed class LauncherStateDto

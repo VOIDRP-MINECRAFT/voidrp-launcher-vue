@@ -195,6 +195,8 @@ public sealed class LauncherStateService
         return new LauncherDashboardDto
         {
             WalletBalance = dashboard.WalletBalance,
+            TelegramLinked = dashboard.TelegramLinked,
+            TelegramBotUrl = string.IsNullOrWhiteSpace(dashboard.TelegramBotUrl) ? "https://t.me/voidrp_bot?start=link" : dashboard.TelegramBotUrl,
             Nation = dashboard.Nation is null
                 ? new LauncherDashboardNationDto()
                 : new LauncherDashboardNationDto

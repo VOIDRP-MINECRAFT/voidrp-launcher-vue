@@ -47,6 +47,23 @@ const stats = computed(() => allStats.value.filter((s) => !s.feature || feat(s.f
 
 <template>
   <div class="space-y-4">
+    <!-- Telegram не привязан: бонус в игре и напоминание о награде второго дня -->
+    <button
+      v-if="launcher.isAuthenticated && launcher.telegramLinked === false"
+      type="button"
+      class="flex w-full items-center gap-3 rounded-2xl border border-sky-400/25 bg-sky-500/10 px-4 py-3 text-left transition hover:border-sky-400/50"
+      @click="launcher.openExternal(launcher.telegramBotUrl)"
+    >
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-sky-500 text-white">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M9.04 15.38 8.86 19c.38 0 .54-.16.74-.36l1.78-1.7 3.69 2.7c.68.37 1.16.18 1.34-.63l2.43-11.4c.22-1-.36-1.39-1.02-1.15L3.57 11.9c-.97.38-.96.92-.17 1.16l3.67 1.15 8.52-5.38c.4-.26.77-.12.47.15"/></svg>
+      </span>
+      <span class="min-w-0 flex-1">
+        <span class="block text-sm font-bold text-white">Привяжи Telegram — получи бонус в игре</span>
+        <span class="block text-xs text-white/50">Бот напомнит о награде за второй день. Открой бота и нажми «Привязать аккаунт».</span>
+      </span>
+      <span class="text-xs font-bold text-sky-300">Открыть →</span>
+    </button>
+
     <!-- Header -->
     <div class="flex items-center justify-between gap-3">
       <div>

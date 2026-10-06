@@ -76,6 +76,8 @@ interface LauncherDashboard {
   playerStats: LauncherPlayerStats
   recentActivity: Array<{ eventType: string; message: string; createdAt: string | null }>
   walletBalance: number
+  telegramLinked: boolean
+  telegramBotUrl: string
 }
 
 interface BattlePassProfile {
@@ -247,7 +249,7 @@ function defaultPlayerStats(): LauncherPlayerStats {
   }
 }
 function defaultDashboard(): LauncherDashboard {
-  return { nation: defaultNation(), nationStats: defaultNationStats(), playerStats: defaultPlayerStats(), recentActivity: [], walletBalance: 0 }
+  return { nation: defaultNation(), nationStats: defaultNationStats(), playerStats: defaultPlayerStats(), recentActivity: [], walletBalance: 0, telegramLinked: true, telegramBotUrl: 'https://t.me/voidrp_bot?start=link' }
 }
 function defaultState(): LauncherState {
   return {
@@ -503,6 +505,8 @@ export const useLauncherStore = defineStore('launcher', () => {
       playerStats: { ...defaultPlayerStats(), ...((next.dashboard?.playerStats as any) ?? {}) },
       recentActivity: Array.isArray(next.dashboard?.recentActivity) ? (next.dashboard?.recentActivity as any) : [],
       walletBalance: Number(next.dashboard?.walletBalance ?? 0),
+      telegramLinked: next.dashboard?.telegramLinked !== false,
+      telegramBotUrl: String(next.dashboard?.telegramBotUrl || 'https://t.me/voidrp_bot?start=link'),
     }
     state.lastCrash = (next.lastCrash as any) ?? null
   }
@@ -1115,6 +1119,8 @@ export const useLauncherStore = defineStore('launcher', () => {
     playerStats: computed(() => state.dashboard.playerStats),
     recentActivity: computed(() => state.dashboard.recentActivity),
     walletBalance: computed(() => state.dashboard.walletBalance),
+    telegramLinked: computed(() => state.dashboard.telegramLinked),
+    telegramBotUrl: computed(() => state.dashboard.telegramBotUrl),
     skin: computed(() => skin),
     toasts: computed(() => toasts),
     shouldShowProgress: computed(() => state.progress.visible),

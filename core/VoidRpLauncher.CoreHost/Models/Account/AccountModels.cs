@@ -196,6 +196,8 @@ public sealed class LauncherDashboardResponseDto
     [JsonPropertyName("player_stats")] public LauncherDashboardPlayerStatsResponseDto? PlayerStats { get; set; }
     [JsonPropertyName("recent_activity")] public List<LauncherDashboardActivityResponseDto> RecentActivity { get; set; } = new();
     [JsonPropertyName("wallet_balance")] public double WalletBalance { get; set; }
+    [JsonPropertyName("telegram_linked")] public bool TelegramLinked { get; set; }
+    [JsonPropertyName("telegram_bot_url")] public string? TelegramBotUrl { get; set; }
 }
 
 public sealed class LauncherAuthSnapshot
