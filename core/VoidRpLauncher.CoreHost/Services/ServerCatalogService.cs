@@ -147,7 +147,8 @@ public sealed class ServerCatalogService
         var server = GetSelectedServer();
         if (server is not null && !string.IsNullOrWhiteSpace(server.Slug))
         {
-            _paths.SetActiveServer(server.Slug, server.IsDefault);
+            // only the main server inherits a legacy single-server install, whatever the default is
+            _paths.SetActiveServer(server.Slug, server.IsPrimary);
             return;
         }
 
@@ -301,6 +302,10 @@ public sealed class GameServerDto
     /// host as is (the server matches the ticket by nickname and address).</summary>
     public bool TicketHostname { get; set; }
     public bool IsDefault { get; set; }
+
+    // The platform's main server (backend PRIMARY_SERVER_SLUG) — owner of the pre-multi-server
+    // install. Not IsDefault: that is only which server the site/launcher starts on.
+    public bool IsPrimary { get; set; }
     /// <summary>Server visible only to staff — the backend already filtered it
     /// out for everyone else, so a true value just drives the "🔒" badge.</summary>
     public bool StaffOnly { get; set; }
