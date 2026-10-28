@@ -570,9 +570,10 @@ export const useLauncherStore = defineStore('launcher', () => {
   async function initializeApp() {
     if (bootstrapPromise) return bootstrapPromise
     bootstrapPromise = (async () => {
-      // /api/bootstrap blocks while CoreHost downloads the Java runtime + pack.
-      // Poll /api/state during it so the splash shows live progress (current
-      // file + %) instead of a frozen "Подключение к ядру..." label.
+      // /api/bootstrap restores the session and loads the dashboard; the game
+      // files come in the background afterwards (progress on the home screen).
+      // Poll /api/state during it so the splash shows live progress instead of
+      // a frozen "Подключение к ядру..." label.
       let bootstrapPoll: number | null = window.setInterval(() => { void pollStateOnce() }, 500)
       const stopBootstrapPoll = () => {
         if (bootstrapPoll != null) { window.clearInterval(bootstrapPoll); bootstrapPoll = null }

@@ -87,15 +87,11 @@ public sealed class LauncherFacadeService
             _diagnostics.Info("Core", "Launcher core bootstrap started.");
             _ = _crashRules.RefreshAsync(CancellationToken.None);
             _stateService.SetStatus("Подготавливаем окружение...");
-            _stateService.SetProgress("Java runtime", "Проверяем игровой Java runtime...", 0);
 
             try
             {
-                await _runtimeBootstrapService.EnsureRuntimeAsync((details, percent) =>
-                {
-                    _stateService.SetProgress("Java runtime", details, percent);
-                }, cancellationToken);
-
+                // The game files (Java, Minecraft, NeoForge — over a gigabyte the first time) are
+                // not waited for here: the launcher opens at once and they come in the background.
                 var snapshot = await _authSessionService.TryRestoreAsync(cancellationToken);
                 if (snapshot is not null)
                 {
@@ -125,6 +121,7 @@ public sealed class LauncherFacadeService
                 _stateService.SetStatus(snapshot?.IsAuthenticated == true
                     ? "Лаунчер готов. Можно запускать игру."
                     : "Лаунчер готов. Выполните вход для запуска.");
+                StartRuntimePrefetch();
 
                 return OperationResponseDto.Success(GetState());
             }
@@ -255,13 +252,14 @@ public sealed class LauncherFacadeService
             // modal doesn't linger while the game is starting up again.
             _stateService.ClearCrash();
             _stateService.SetStatus("Проверяем клиент перед запуском...");
-            _stateService.SetProgress("Java runtime", "Проверяем игровой Java runtime...", 0);
+            _stateService.SetProgress("Игровые файлы", "Проверяем игровые файлы...", 0);
 
             try
             {
+                // Joins the background download when it is still going, so nothing is fetched twice.
                 await _runtimeBootstrapService.EnsureRuntimeAsync((details, percent) =>
                 {
-                    _stateService.SetProgress("Java runtime", details, percent);
+                    _stateService.SetProgress("Игровые файлы", details, percent);
                 }, cancellationToken);
 
                 _stateService.SetProgress("Подготовка", "Загружаем pack manifest...", 0);
@@ -344,6 +342,9 @@ public sealed class LauncherFacadeService
 
             try
             {
+                // The background download writes into the same folders the repair cleans.
+                await _runtimeBootstrapService.CancelAsync();
+
                 // Repair the currently-selected server's install, not a stale one.
                 await _serverCatalog.EnsureLoadedAsync(cancellationToken);
                 _serverCatalog.ApplyActiveServerToPaths();
@@ -356,6 +357,7 @@ public sealed class LauncherFacadeService
 
                 _stateService.SetProgress("Ремонт", "Готово.", 100);
                 _stateService.SetStatus("Ремонт завершён. Теперь можно заново синхронизировать клиент.");
+                StartRuntimePrefetch();
                 return OperationResponseDto.Success(GetState(),
                     "Ремонт завершён. Настройки модов сброшены к настройкам сборки, старые сохранены в папке config-backups.");
             }
@@ -669,6 +671,8 @@ public sealed class LauncherFacadeService
 
             // CEF helpers from a previous game session keep files in the game folder locked.
             KillLingeringCefProcesses();
+            // Nor may the background download keep writing into the folder being moved.
+            await _runtimeBootstrapService.CancelAsync();
             try
             {
                 _stateService.SetProgress("Перенос файлов игры", "Готовим перенос...", 0);
@@ -692,6 +696,7 @@ public sealed class LauncherFacadeService
                 ? "Файлы игры перенесены. Можно запускать."
                 : "Папка игры изменена. При запуске лаунчер докачает недостающие файлы.";
             _stateService.SetStatus(message);
+            StartRuntimePrefetch();
             return OperationResponseDto.Success(GetState(), message);
         });
 
@@ -863,6 +868,41 @@ public sealed class LauncherFacadeService
         {
             _diagnostics.Warn("Launch", $"CEF process cleanup error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Brings the selected server's game files (Java, Minecraft, NeoForge) in the background, so
+    /// the launcher opens at once and Play finds them ready. Play joins the same download.
+    /// Called after start-up, a server switch, a repair and a game folder move.
+    /// </summary>
+    public void StartRuntimePrefetch()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _runtimeBootstrapService.EnsureRuntimeAsync((details, percent) =>
+                {
+                    // An operation of the player's own (login, Play) owns the progress bar.
+                    if (!_stateService.IsBusy)
+                        _stateService.SetProgress("Подготовка игры", details, percent);
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                // another server was picked, or a repair / folder move stopped it
+            }
+            catch (Exception ex)
+            {
+                // Play tries again and shows the error to the player.
+                _diagnostics.Warn("Runtime", $"Background game files download failed: {ex.Message}");
+            }
+            finally
+            {
+                if (!_stateService.IsBusy)
+                    _stateService.ClearProgress();
+            }
+        });
     }
 
     private async Task<OperationResponseDto> RunExclusiveAsync(Func<Task<OperationResponseDto>> action)

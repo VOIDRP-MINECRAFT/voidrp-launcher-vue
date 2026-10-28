@@ -125,6 +125,8 @@ app.MapPost("/api/servers/select", async (ServerSelectDto dto, ServerCatalogServ
     }
 
     catalog.SelectServer(dto.Slug);
+    // The new server's game files start coming in now (the old server's download stops).
+    facade.StartRuntimePrefetch();
     // Reload the dashboard scoped to the new server and hand back fresh state.
     var refreshed = await facade.RefreshDashboardAsync(CancellationToken.None);
     return Results.Ok(new { selectedSlug = catalog.GetSelectedSlug(), state = refreshed.State });

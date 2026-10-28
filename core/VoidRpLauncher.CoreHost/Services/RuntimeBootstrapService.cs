@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using VoidRpLauncher.CoreHost.Configuration;
@@ -12,12 +13,35 @@ public sealed class RuntimeBootstrapService
         PropertyNameCaseInsensitive = true
     };
 
+    // The runtime is thousands of small files (assets above all); one at a time the round trips
+    // alone took minutes. Same bound as the pack sync in FileSyncService.
+    private const int DownloadConcurrency = 8;
+    private const int DownloadAttempts = 3;
+
+    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    {
+        MaxConnectionsPerServer = DownloadConcurrency,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        AutomaticDecompression = DecompressionMethods.All
+    })
+    {
+        DefaultRequestVersion = HttpVersion.Version20,
+        DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        Timeout = TimeSpan.FromMinutes(10)
+    };
+
     private readonly AppEndpointsOptions _endpoints;
     private readonly LauncherPathsService _pathsService;
     private readonly HashService _hashService;
     private readonly DiagnosticsService _diagnostics;
     private readonly ServerCatalogService _serverCatalog;
-    private readonly SemaphoreSlim _runtimeLock = new(1, 1);
+
+    // One run at a time. The background prefetch and Play share it: whoever asks for the same
+    // server while a run is going joins that run instead of starting a second one, and the
+    // latest caller's progress callback is the one that gets the updates.
+    private readonly object _gate = new();
+    private RuntimeRun? _current;
+    private volatile Action<string, double>? _listener;
 
     public RuntimeBootstrapService(
         AppEndpointsOptions endpoints,
@@ -35,85 +59,159 @@ public sealed class RuntimeBootstrapService
 
     public async Task EnsureRuntimeAsync(Action<string, double>? progress = null, CancellationToken cancellationToken = default)
     {
-        await _runtimeLock.WaitAsync(cancellationToken);
-        try
+        // Resolve the active server first so all per-server directories
+        // (game, java, runtime state) point at servers/<slug>/. Loads the
+        // catalogue so per-server runtime seed/manifest overrides resolve too.
+        await _serverCatalog.EnsureLoadedAsync(cancellationToken);
+
+        Task task;
+        lock (_gate)
         {
-            // Resolve the active server first so all per-server directories
-            // (game, java, runtime state) point at servers/<slug>/ before we
-            // create them. Loads the catalogue so per-server runtime seed/
-            // manifest overrides can be resolved too.
-            await _serverCatalog.EnsureLoadedAsync(cancellationToken);
             _serverCatalog.ApplyActiveServerToPaths();
-
-            _pathsService.EnsureBaseDirectories();
-            progress?.Invoke("Проверяем Java runtime...", 0);
-
-            var hasJava = TryResolveExistingRuntime(out var existingJavaPath);
-            if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
+            // Paths follow the selected server and change the moment the player picks another
+            // one; pin this server's folders now so a running download never lands elsewhere.
+            var plan = CapturePlan();
+            if (progress is not null)
             {
-                _diagnostics.Info("Runtime", $"Using existing runtime: {existingJavaPath}");
+                _listener = progress;
+            }
+
+            if (_current is { } running && !running.Task.IsCompleted && running.Key == plan.Key)
+            {
+                task = running.Task;
             }
             else
             {
-                _diagnostics.Info("Runtime", "Local runtime not found. Resolving runtime-seed.");
+                // A different server (or game folder) now: the old run is no longer wanted.
+                var previous = _current;
+                previous?.Cts.Cancel();
+                var cts = new CancellationTokenSource();
+                task = Task.Run(() => RunAsync(plan, previous?.Task, cts.Token));
+                _current = new RuntimeRun(plan.Key, task, cts);
             }
-
-            progress?.Invoke("Получаем runtime manifest...", 6);
-
-            var manifestUrl = await ResolveManifestUrlAsync(cancellationToken);
-            _diagnostics.Info("Runtime", $"Runtime manifest: {manifestUrl}");
-            progress?.Invoke("Загружаем runtime manifest...", 12);
-
-            var manifest = await LoadRuntimeManifestAsync(manifestUrl, cancellationToken);
-            if (manifest.Files.Count == 0)
-            {
-                throw new InvalidOperationException("Runtime manifest не содержит файлов для загрузки.");
-            }
-
-            // Fast path: Java exists AND manifest fingerprint matches stored stamp → skip file sync.
-            if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
-            {
-                var stampPath = Path.Combine(_pathsService.ServerStateDirectory, "runtime.stamp");
-                var fingerprint = ComputeManifestFingerprint(manifest);
-                // The stamp only says the runtime was synced once; files may have gone since
-                // (deleted by hand, an antivirus, a cleanup). A missing asset leaves the game
-                // on a black screen, so check every file is still there before trusting it.
-                if (File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == fingerprint
-                    && AllRuntimeFilesPresent(manifest))
-                {
-                    _diagnostics.Info("Runtime", "Runtime stamp matches manifest fingerprint — skipping file sync.");
-                    progress?.Invoke("Java runtime готов.", 100);
-                    return;
-                }
-            }
-
-            await SyncRuntimeFilesAsync(manifest, progress, cancellationToken);
-
-            if (!TryResolveExistingRuntime(out var installedJavaPath))
-            {
-                throw new InvalidOperationException("Java runtime был синхронизирован, но java.exe/javaw.exe не найден.");
-            }
-
-            // Write manifest fingerprint so next launch can skip file sync.
-            try { File.WriteAllText(Path.Combine(_pathsService.ServerStateDirectory, "runtime.stamp"), ComputeManifestFingerprint(manifest)); }
-            catch { }
-
-            _diagnostics.Info("Runtime", $"Runtime prepared: {installedJavaPath}");
-            progress?.Invoke("Java runtime готов.", 100);
         }
-        finally
+
+        await task.WaitAsync(cancellationToken);
+    }
+
+    /// <summary>Stops a running download and waits for it to let go of the files
+    /// (before a repair or a move of the game folder).</summary>
+    public async Task CancelAsync()
+    {
+        RuntimeRun? running;
+        lock (_gate)
         {
-            _runtimeLock.Release();
+            running = _current;
+        }
+
+        if (running is null || running.Task.IsCompleted)
+        {
+            return;
+        }
+
+        running.Cts.Cancel();
+        try
+        {
+            await running.Task;
+        }
+        catch
+        {
+            // cancelled or failed — either way it is done with the files
         }
     }
 
-    private bool AllRuntimeFilesPresent(RuntimeManifestPayload manifest)
+    private RuntimePlan CapturePlan()
+    {
+        var gameDirectory = _pathsService.GameDirectory;
+        return new RuntimePlan(
+            gameDirectory,
+            gameDirectory,
+            _pathsService.JavaDirectory,
+            _pathsService.ServerStateDirectory,
+            // Per-server seed URL when the selected server defines one, else the
+            // launcher-global endpoint.
+            _serverCatalog.ResolveRuntimeSeedUrl(),
+            BuildFallbackManifestUrl());
+    }
+
+    private void Report(string details, double percent) => _listener?.Invoke(details, percent);
+
+    private async Task RunAsync(RuntimePlan plan, Task? previous, CancellationToken cancellationToken)
+    {
+        if (previous is not null)
+        {
+            // Let the cancelled run finish its current files first; two runs never write at once.
+            try { await previous; } catch { }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        _pathsService.EnsureBaseDirectories();
+        Report("Проверяем игровые файлы...", 0);
+
+        var hasJava = TryResolveExistingRuntime(plan, out var existingJavaPath);
+        if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
+        {
+            _diagnostics.Info("Runtime", $"Using existing runtime: {existingJavaPath}");
+        }
+        else
+        {
+            _diagnostics.Info("Runtime", "Local runtime not found. Resolving runtime-seed.");
+        }
+
+        Report("Получаем список файлов...", 1);
+
+        var manifestUrl = await ResolveManifestUrlAsync(plan, cancellationToken);
+        _diagnostics.Info("Runtime", $"Runtime manifest: {manifestUrl}");
+
+        var manifest = await LoadRuntimeManifestAsync(manifestUrl, cancellationToken);
+        if (manifest.Files.Count == 0)
+        {
+            throw new InvalidOperationException("Runtime manifest не содержит файлов для загрузки.");
+        }
+
+        var stampPath = Path.Combine(plan.StateDirectory, "runtime.stamp");
+
+        // Fast path: Java exists AND manifest fingerprint matches stored stamp → skip file sync.
+        if (hasJava && !string.IsNullOrWhiteSpace(existingJavaPath))
+        {
+            var fingerprint = ComputeManifestFingerprint(manifest);
+            // The stamp only says the runtime was synced once; files may have gone since
+            // (deleted by hand, an antivirus, a cleanup). A missing asset leaves the game
+            // on a black screen, so check every file is still there before trusting it.
+            if (File.Exists(stampPath) && File.ReadAllText(stampPath).Trim() == fingerprint
+                && AllRuntimeFilesPresent(plan, manifest))
+            {
+                _diagnostics.Info("Runtime", "Runtime stamp matches manifest fingerprint — skipping file sync.");
+                Report("Игровые файлы готовы.", 100);
+                return;
+            }
+        }
+
+        await SyncRuntimeFilesAsync(plan, manifest, cancellationToken);
+
+        if (!TryResolveExistingRuntime(plan, out var installedJavaPath))
+        {
+            throw new InvalidOperationException("Java runtime был синхронизирован, но java.exe/javaw.exe не найден.");
+        }
+
+        // Write manifest fingerprint so next launch can skip file sync.
+        try
+        {
+            Directory.CreateDirectory(plan.StateDirectory);
+            File.WriteAllText(stampPath, ComputeManifestFingerprint(manifest));
+        }
+        catch { }
+
+        _diagnostics.Info("Runtime", $"Runtime prepared: {installedJavaPath}");
+        Report("Игровые файлы готовы.", 100);
+    }
+
+    private bool AllRuntimeFilesPresent(RuntimePlan plan, RuntimeManifestPayload manifest)
     {
         foreach (var entry in manifest.Files)
         {
             var relativePath = NormalizeRelativePath(entry.Path);
-            var localPath = Path.Combine(ResolveTargetBaseDirectory(relativePath), relativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(localPath))
+            if (!File.Exists(ResolveLocalPath(plan, relativePath)))
             {
                 _diagnostics.Warn("Runtime", $"Runtime file missing, re-syncing: {relativePath}");
                 return false;
@@ -125,11 +223,11 @@ public sealed class RuntimeBootstrapService
     private static string ComputeManifestFingerprint(RuntimeManifestPayload manifest)
         => $"{manifest.NeoForgeVersion}|{manifest.BuildDateUtc}|{manifest.Files.Count}";
 
-    private bool TryResolveExistingRuntime(out string? javaPath)
+    private bool TryResolveExistingRuntime(RuntimePlan plan, out string? javaPath)
     {
         try
         {
-            javaPath = _pathsService.ResolveJavaExecutablePath();
+            javaPath = _pathsService.ResolveJavaExecutablePath(plan.JavaDirectory);
             return !string.IsNullOrWhiteSpace(javaPath);
         }
         catch
@@ -139,13 +237,10 @@ public sealed class RuntimeBootstrapService
         }
     }
 
-    private async Task<string> ResolveManifestUrlAsync(CancellationToken cancellationToken)
+    private async Task<string> ResolveManifestUrlAsync(RuntimePlan plan, CancellationToken cancellationToken)
     {
-        var fallbackUrl = BuildFallbackManifestUrl();
-
-        // Per-server seed URL when the selected server defines one, else the
-        // launcher-global endpoint.
-        var seedUrl = _serverCatalog.ResolveRuntimeSeedUrl();
+        var fallbackUrl = plan.FallbackManifestUrl;
+        var seedUrl = plan.SeedUrl;
 
         if (string.IsNullOrWhiteSpace(seedUrl))
         {
@@ -155,8 +250,7 @@ public sealed class RuntimeBootstrapService
 
         try
         {
-            using var client = new HttpClient();
-            using var response = await client.GetAsync(AddCacheBuster(seedUrl), cancellationToken);
+            using var response = await Http.GetAsync(AddCacheBuster(seedUrl), cancellationToken);
             response.EnsureSuccessStatusCode();
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -170,7 +264,7 @@ public sealed class RuntimeBootstrapService
 
             _diagnostics.Warn("Runtime", $"runtime-seed answered but manifest url was not found. Fallback to {fallbackUrl}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _diagnostics.Warn("Runtime", $"runtime-seed request failed: {ex.Message}. Fallback to {fallbackUrl}");
         }
@@ -274,10 +368,9 @@ public sealed class RuntimeBootstrapService
         return !string.IsNullOrWhiteSpace(value);
     }
 
-    private async Task<RuntimeManifestPayload> LoadRuntimeManifestAsync(string manifestUrl, CancellationToken cancellationToken)
+    private static async Task<RuntimeManifestPayload> LoadRuntimeManifestAsync(string manifestUrl, CancellationToken cancellationToken)
     {
-        using var client = new HttpClient();
-        var payload = await client.GetFromJsonAsync<RuntimeManifestDto>(AddCacheBuster(manifestUrl), JsonOptions, cancellationToken);
+        var payload = await Http.GetFromJsonAsync<RuntimeManifestDto>(AddCacheBuster(manifestUrl), JsonOptions, cancellationToken);
         if (payload is null)
         {
             throw new InvalidOperationException("Runtime manifest is empty or could not be parsed.");
@@ -302,46 +395,62 @@ public sealed class RuntimeBootstrapService
             files);
     }
 
-    private async Task SyncRuntimeFilesAsync(
-        RuntimeManifestPayload manifest,
-        Action<string, double>? progress,
-        CancellationToken cancellationToken)
+    private async Task SyncRuntimeFilesAsync(RuntimePlan plan, RuntimeManifestPayload manifest, CancellationToken cancellationToken)
     {
-        using var client = new HttpClient();
         var totalFiles = manifest.Files.Count;
+        var totalBytes = manifest.Files.Sum(static f => Math.Max(0, f.Size));
+        long doneBytes = 0;
+        var doneFiles = 0;
+        var downloaded = 0;
 
-        for (var index = 0; index < totalFiles; index++)
+        // Percent by bytes: a few big jars and thousands of tiny sounds make a file count jumpy.
+        void ReportBytes(string verb)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var bytes = Interlocked.Read(ref doneBytes);
+            var percent = totalBytes > 0 ? (double)bytes / totalBytes * 100.0 : (double)Volatile.Read(ref doneFiles) / totalFiles * 100.0;
+            Report($"{verb}: {FormatBytes(bytes)} из {FormatBytes(totalBytes)} · файлов {Volatile.Read(ref doneFiles)} из {totalFiles}", percent);
+        }
 
-            var entry = manifest.Files[index];
+        await Parallel.ForEachAsync(manifest.Files, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = DownloadConcurrency,
+            CancellationToken = cancellationToken
+        }, async (entry, ct) =>
+        {
             var relativePath = NormalizeRelativePath(entry.Path);
-
-            var baseDirectory = ResolveTargetBaseDirectory(relativePath);
-            var localPath = Path.Combine(baseDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            var localPath = ResolveLocalPath(plan, relativePath);
             var directory = Path.GetDirectoryName(localPath);
-
             if (!string.IsNullOrWhiteSpace(directory))
             {
                 Directory.CreateDirectory(directory);
             }
 
-            progress?.Invoke($"Подготавливаем runtime: {relativePath}", CalculatePercent(index, totalFiles, 0));
-
-            if (!NeedsDownload(entry, localPath))
+            if (NeedsDownload(entry, localPath))
             {
-                progress?.Invoke($"Runtime готов: {relativePath}", CalculatePercent(index + 1, totalFiles, 0));
-                continue;
+                _diagnostics.Info("Runtime", $"Downloading runtime file: {relativePath}");
+                Interlocked.Increment(ref downloaded);
+                await DownloadRuntimeFileAsync(entry, localPath, read =>
+                {
+                    Interlocked.Add(ref doneBytes, read);
+                    ReportBytes("Скачиваем игровые файлы");
+                }, ct);
+            }
+            else
+            {
+                Interlocked.Add(ref doneBytes, Math.Max(0, entry.Size));
             }
 
-            _diagnostics.Info("Runtime", $"Downloading runtime file: {relativePath}");
-            await DownloadRuntimeFileAsync(client, entry, localPath, index, totalFiles, progress, cancellationToken);
-        }
+            Interlocked.Increment(ref doneFiles);
+            ReportBytes(Volatile.Read(ref downloaded) > 0 ? "Скачиваем игровые файлы" : "Проверяем игровые файлы");
+        });
 
         _hashService.Flush();
     }
 
-    private string ResolveTargetBaseDirectory(string relativePath)
+    private static string ResolveLocalPath(RuntimePlan plan, string relativePath)
+        => Path.Combine(ResolveTargetBaseDirectory(plan, relativePath), relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    private static string ResolveTargetBaseDirectory(RuntimePlan plan, string relativePath)
     {
         var normalized = NormalizeRelativePath(relativePath);
 
@@ -357,11 +466,11 @@ public sealed class RuntimeBootstrapService
             normalized.StartsWith("kubejs/", StringComparison.OrdinalIgnoreCase) ||
             normalized.StartsWith("scripts/", StringComparison.OrdinalIgnoreCase))
         {
-            return _pathsService.GameDirectory;
+            return plan.GameDirectory;
         }
 
         // Всё остальное считаем Java runtime
-        return _pathsService.JavaDirectory;
+        return plan.JavaDirectory;
     }
 
     private bool NeedsDownload(LauncherManifestFile entry, string localPath)
@@ -389,21 +498,42 @@ public sealed class RuntimeBootstrapService
     }
 
     private async Task DownloadRuntimeFileAsync(
-        HttpClient client,
         LauncherManifestFile entry,
         string localPath,
-        int index,
-        int totalFiles,
-        Action<string, double>? progress,
+        Action<long> onBytes,
+        CancellationToken cancellationToken)
+    {
+        // A dropped connection on one of thousands of files should not fail the whole run.
+        for (var attempt = 1; ; attempt++)
+        {
+            long attemptBytes = 0;
+            try
+            {
+                await DownloadRuntimeFileOnceAsync(entry, localPath, read =>
+                {
+                    attemptBytes += read;
+                    onBytes(read);
+                }, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (attempt < DownloadAttempts && !cancellationToken.IsCancellationRequested
+                                       && ex is HttpRequestException or IOException or TaskCanceledException)
+            {
+                // Take back what the failed attempt counted, the retry reports it again.
+                onBytes(-attemptBytes);
+                _diagnostics.Warn("Runtime", $"Retry {attempt}/{DownloadAttempts - 1} for {entry.Path}: {ex.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(attempt * 2), cancellationToken);
+            }
+        }
+    }
+
+    private async Task DownloadRuntimeFileOnceAsync(
+        LauncherManifestFile entry,
+        string localPath,
+        Action<long> onBytes,
         CancellationToken cancellationToken)
     {
         var tempPath = localPath + ".download";
-        var tempDirectory = Path.GetDirectoryName(tempPath);
-        if (!string.IsNullOrWhiteSpace(tempDirectory))
-        {
-            Directory.CreateDirectory(tempDirectory);
-        }
-
         if (File.Exists(tempPath))
         {
             TryDeleteFileWithRetries(tempPath);
@@ -411,10 +541,8 @@ public sealed class RuntimeBootstrapService
 
         try
         {
-            using var response = await client.GetAsync(entry.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await Http.GetAsync(entry.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
-
-            var totalBytes = response.Content.Headers.ContentLength ?? entry.Size;
 
             await using (var sourceStream = await response.Content.ReadAsStreamAsync(cancellationToken))
             await using (var targetStream = new FileStream(
@@ -426,7 +554,6 @@ public sealed class RuntimeBootstrapService
                 useAsync: true))
             {
                 var buffer = new byte[1024 * 64];
-                long downloadedBytes = 0;
 
                 while (true)
                 {
@@ -437,12 +564,7 @@ public sealed class RuntimeBootstrapService
                     }
 
                     await targetStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                    downloadedBytes += read;
-
-                    var fileRatio = totalBytes > 0 ? (double)downloadedBytes / totalBytes : 0;
-                    progress?.Invoke(
-                        $"Скачиваем runtime: {entry.Path} ({FormatBytes(downloadedBytes)} / {FormatBytes(totalBytes)})",
-                        CalculatePercent(index, totalFiles, fileRatio));
+                    onBytes(read);
                 }
 
                 await targetStream.FlushAsync(cancellationToken);
@@ -453,7 +575,7 @@ public sealed class RuntimeBootstrapService
                 var downloadedHash = _hashService.ComputeSha256(tempPath);
                 if (!downloadedHash.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException(
+                    throw new IOException(
                         $"Hash mismatch for runtime file {entry.Path}. Expected {entry.Sha256}, got {downloadedHash}.");
                 }
             }
@@ -464,7 +586,7 @@ public sealed class RuntimeBootstrapService
             }
 
             File.Move(tempPath, localPath);
-            progress?.Invoke($"Runtime готов: {entry.Path}", CalculatePercent(index + 1, totalFiles, 0));
+            _hashService.Moved(tempPath, localPath);
         }
         catch
         {
@@ -509,17 +631,6 @@ public sealed class RuntimeBootstrapService
         throw new IOException($"Unable to delete file: {path}", lastError);
     }
 
-    private static double CalculatePercent(int fileIndex, int totalFiles, double fileRatio)
-    {
-        if (totalFiles <= 0)
-        {
-            return 100;
-        }
-
-        fileRatio = Math.Max(0, Math.Min(1, fileRatio));
-        return Math.Max(0, Math.Min(100, (((double)fileIndex / totalFiles) + (fileRatio / totalFiles)) * 100.0));
-    }
-
     private static string AddCacheBuster(string url)
     {
         var separator = url.Contains('?') ? "&" : "?";
@@ -548,6 +659,17 @@ public sealed class RuntimeBootstrapService
 
         return $"{value:0.##} {units[unitIndex]}";
     }
+
+    // Key = the game folder: it differs per server and changes with a moved game location.
+    private sealed record RuntimePlan(
+        string Key,
+        string GameDirectory,
+        string JavaDirectory,
+        string StateDirectory,
+        string? SeedUrl,
+        string FallbackManifestUrl);
+
+    private sealed record RuntimeRun(string Key, Task Task, CancellationTokenSource Cts);
 
     private sealed record RuntimeManifestPayload(string ManifestUrl, string NeoForgeVersion, string BuildDateUtc, List<LauncherManifestFile> Files);
 

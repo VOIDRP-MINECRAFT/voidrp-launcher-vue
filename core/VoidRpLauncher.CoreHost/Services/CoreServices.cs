@@ -340,23 +340,26 @@ public sealed class LauncherPathsService
         return bundlePath;
     }
 
-    public string ResolveJavaExecutablePath()
+    public string ResolveJavaExecutablePath() => ResolveJavaExecutablePath(JavaDirectory);
+
+    // The runtime download pins its server's java folder up front, so it asks by path.
+    public string ResolveJavaExecutablePath(string javaDirectory)
     {
-        var guiPath = Path.Combine(JavaDirectory, "bin", Platform.IsWindows ? "javaw.exe" : "java");
-        var consolePath = Path.Combine(JavaDirectory, "bin", Platform.IsWindows ? "java.exe" : "java");
+        var guiPath = Path.Combine(javaDirectory, "bin", Platform.IsWindows ? "javaw.exe" : "java");
+        var consolePath = Path.Combine(javaDirectory, "bin", Platform.IsWindows ? "java.exe" : "java");
         if (File.Exists(guiPath)) return guiPath;
         if (File.Exists(consolePath)) return consolePath;
 
-        if (Directory.Exists(JavaDirectory))
+        if (Directory.Exists(javaDirectory))
         {
-            var f1 = Directory.EnumerateFiles(JavaDirectory, Platform.IsWindows ? "javaw.exe" : "java", SearchOption.AllDirectories).FirstOrDefault();
+            var f1 = Directory.EnumerateFiles(javaDirectory, Platform.IsWindows ? "javaw.exe" : "java", SearchOption.AllDirectories).FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(f1)) return f1;
 
-            var f2 = Directory.EnumerateFiles(JavaDirectory, Platform.IsWindows ? "java.exe" : "java", SearchOption.AllDirectories).FirstOrDefault();
+            var f2 = Directory.EnumerateFiles(javaDirectory, Platform.IsWindows ? "java.exe" : "java", SearchOption.AllDirectories).FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(f2)) return f2;
         }
 
-        throw new FileNotFoundException($"Java executable not found inside '{JavaDirectory}'.");
+        throw new FileNotFoundException($"Java executable not found inside '{javaDirectory}'.");
     }
 
     private string ResolveLauncherInstallDirectory()
@@ -428,6 +431,16 @@ public sealed class HashService
         catch { }
 
         return hash;
+    }
+
+    // A download is verified under its temporary name and then renamed into place. A rename keeps
+    // size and mtime, so the hash carries over instead of being computed again on the next check
+    // (and the cache does not fill up with ".download" paths).
+    public void Moved(string fromPath, string toPath)
+    {
+        if (!_cache.TryRemove(fromPath, out var entry)) return;
+        _cache[toPath] = entry;
+        _dirty = true;
     }
 
     public void Flush()
@@ -1074,6 +1087,7 @@ public sealed class FileSyncService
                 File.Delete(localPath);
 
             File.Move(tempPath, localPath);
+            _hashService.Moved(tempPath, localPath);
         }
         catch
         {
