@@ -453,3 +453,76 @@ body {
 [data-mode="light"] .hover\:border-white\/25:hover { border-color: rgba(15, 23, 42, 0.18) !important; }
 [data-mode="light"] .hover\:border-white\/20:hover { border-color: rgba(15, 23, 42, 0.16) !important; }
 [data-mode="light"] .hover\:border-white\/12:hover { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+/* ════════════════════════════════════════════════════════════════
+   GAME-NATIVE PIECES (28.10.2026)
+   The launcher speaks Minecraft's own language for game data: stats sit
+   in inventory slots with the real item icons, progress fills like the
+   XP bar, money is gold. Display type (Unbounded, bundled) for headings,
+   nicknames and the big numbers; body text stays on the system face.
+   ════════════════════════════════════════════════════════════════ */
+:root {
+  --font-display: 'Unbounded Variable', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --mc-gold: #f2c14e;
+  --mc-xp: #7ee04a;
+  --mc-xp-deep: #3f9b1c;
+}
+
+.font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+
+/* 16×16 item textures, scaled by whole pixels so they stay crisp. */
+.item-icon { image-rendering: pixelated; image-rendering: crisp-edges; flex-shrink: 0; }
+
+/* An inventory slot: sunken square well (dark top-left, lit bottom-right edge like the game's
+   slot), the item sits in it. Used for stat tiles. */
+.mc-slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(145deg, rgba(0, 0, 0, 0.42), rgba(0, 0, 0, 0.18));
+  box-shadow:
+    inset 2px 2px 0 rgba(0, 0, 0, 0.45),
+    inset -1px -1px 0 rgba(255, 255, 255, 0.07);
+}
+[data-mode="light"] .mc-slot {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0.05));
+  box-shadow: inset 2px 2px 0 rgba(15, 23, 42, 0.14), inset -1px -1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* XP-bar progress: the game's segmented green bar. */
+.xp-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.xp-bar__fill {
+  height: 100%;
+  background: linear-gradient(180deg, #a8f56f 0%, var(--mc-xp) 45%, var(--mc-xp-deep) 100%);
+  box-shadow: 0 0 12px rgba(126, 224, 74, 0.45);
+  transition: width 0.6s cubic-bezier(.2, .8, .2, 1);
+}
+/* notches every 1/18 of the bar, as in the game */
+.xp-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(100% / 18 - 1px), rgba(0, 0, 0, 0.55) calc(100% / 18 - 1px) calc(100% / 18));
+  pointer-events: none;
+}
+.xp-bar--gold .xp-bar__fill {
+  background: linear-gradient(180deg, #ffe08a 0%, var(--mc-gold) 45%, #b9861c 100%);
+  box-shadow: 0 0 12px rgba(242, 193, 78, 0.45);
+}
+[data-mode="light"] .xp-bar { background: rgba(15, 23, 42, 0.12); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.18); }
+[data-mode="light"] .xp-bar::after { background: repeating-linear-gradient(90deg, transparent 0 calc(100% / 18 - 1px), rgba(255, 255, 255, 0.7) calc(100% / 18 - 1px) calc(100% / 18)); }
+
+.text-gold { color: var(--mc-gold); }
+[data-mode="light"] .text-gold { color: #9a6b06; }
+
+@media (prefers-reduced-motion: reduce) {
+  .xp-bar__fill { transition: none; }
+}
