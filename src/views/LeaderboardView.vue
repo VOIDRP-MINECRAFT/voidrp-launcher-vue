@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useLauncherStore, BACKEND_BASE, SITE_BASE } from '../stores/launcher'
+import ItemIcon from '../components/game/ItemIcon.vue'
 
 const launcher = useLauncherStore()
 
@@ -69,9 +70,13 @@ const TAB_ICONS: Record<MainTab, string> = {
 
 // ─── Progression ─────────────────────────────────────────────────────────────
 
+// Each epoch of the pack shown by a vanilla item that reads as its theme (src/assets/items).
 const TIER_ICONS: Record<string, string> = {
-  create_age: '⚙️', mekanism_age: '🔩', ae2_age: '💾',
-  reactor_age: '⚛️', draconic_age: '🐉', quantum_age: '🌌', endgame: '♾️',
+  steel_age: 'iron_ingot', mechanisms_age: 'piston', energy_age: 'redstone',
+  automation_age: 'hopper', industry_age: 'blast_furnace', quantum_age: 'ender_eye',
+  singularity_age: 'nether_star', transcendence: 'beacon', magic_path: 'enchanted_book',
+  arcane_path: 'amethyst_shard', hunter_path: 'bow', starlight_path: 'end_rod',
+  draconic_path: 'blaze_rod',
 }
 const loadingLeaderboard = ref(true)
 const loadingMine = ref(true)
@@ -93,7 +98,7 @@ const enrichedTiers = computed(() => {
   if (myProgression.value) for (const t of myProgression.value.tiers) tierMap[t.tier_name] = t
   return leaderboard.value.tiers.map(tier => ({
     ...tier,
-    icon: TIER_ICONS[tier.tier_name] ?? '🏆',
+    icon: TIER_ICONS[tier.tier_name] ?? 'experience_bottle',
     unlocked: unlockedKeys.value.has(tier.tier_name),
     unlocked_at: tierMap[tier.tier_name]?.unlocked_at ?? null,
     total: tier.entries.length,
@@ -259,10 +264,8 @@ function rankRowClass(rank: number) {
   if (rank === 3) return 'bg-amber-600/[0.04]'
   return ''
 }
+// Places are coloured gold / silver / bronze by rankClass; the number itself stays a number.
 function rankLabel(rank: number) {
-  if (rank === 1) return '🥇'
-  if (rank === 2) return '🥈'
-  if (rank === 3) return '🥉'
   return String(rank)
 }
 
@@ -319,30 +322,35 @@ watch(() => launcher.selectedSlug, () => {
 
       <!-- My progression -->
       <section class="rounded-[20px] border border-white/10 bg-white/[0.035] p-4">
-        <p class="text-[10px] uppercase tracking-[0.22em] text-white/40">Моя прогрессия</p>
+        <h2 class="font-display text-[16px] font-semibold text-white">Мои эпохи</h2>
         <div v-if="loadingMine" class="mt-3 flex gap-1.5">
           <div v-for="i in 7" :key="i" class="h-8 flex-1 animate-pulse rounded-xl bg-white/6"></div>
         </div>
         <div v-else-if="myProgression" class="mt-3">
-          <div class="mb-2 flex flex-wrap items-center gap-2">
-            <span class="text-sm font-semibold text-white/90">{{ myProgression.minecraft_nickname }}</span>
-            <span
-              v-if="myProgression.current_tier_label"
-              class="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-semibold text-violet-300"
-            >{{ myProgression.current_tier_label }}</span>
+          <div class="mb-3 max-w-[520px]">
+            <div class="mb-2 flex items-baseline justify-between gap-3 text-[13px]">
+              <span class="font-semibold text-white/85">{{ myProgression.current_tier_label || 'Эпохи ещё впереди' }}</span>
+              <span class="tabular-nums text-white/40">{{ unlockedKeys.size }} из {{ enrichedTiers.length }} открыто</span>
+            </div>
+            <div class="xp-bar">
+              <div class="xp-bar__fill" :style="{ width: `${enrichedTiers.length ? Math.round((unlockedKeys.size / enrichedTiers.length) * 100) : 0}%` }"></div>
+            </div>
           </div>
           <div class="flex flex-wrap gap-1.5">
             <div
               v-for="tier in enrichedTiers"
               :key="tier.tier_name"
               class="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs transition"
-              :class="tier.unlocked ? 'bg-violet-500/15 text-white/90' : 'bg-white/5 text-white/30'"
+              :class="[
+                tier.unlocked ? 'bg-white/8 text-white/90' : 'bg-white/[0.03] text-white/30 grayscale',
+                tier.tier_name === myProgression.current_tier ? 'ring-1 ring-[rgb(var(--acc-rgb))]' : '',
+              ]"
               :title="tier.unlocked ? fmtDateShort(tier.unlocked_at) : 'Не открыто'"
             >
-              <span class="text-sm leading-none">{{ tier.icon }}</span>
+              <ItemIcon :name="tier.icon" :size="16" />
               <span class="font-medium">{{ tier.tier_label }}</span>
-              <span v-if="tier.myRank && tier.myRank <= 3" class="text-[10px] opacity-70">
-                {{ rankLabel(tier.myRank) }}
+              <span v-if="tier.myRank && tier.myRank <= 3" class="text-[10px] font-semibold text-amber-300/90">
+                {{ tier.myRank }}-й
               </span>
             </div>
           </div>
@@ -353,8 +361,8 @@ watch(() => launcher.selectedSlug, () => {
       <!-- Tier leaderboard -->
       <section class="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.035]">
         <div class="border-b border-white/8 px-4 py-3">
-          <p class="text-[10px] uppercase tracking-[0.22em] text-white/40">Рейтинг эпох</p>
-          <h2 class="mt-0.5 text-base font-semibold">Первооткрыватели</h2>
+          <h2 class="font-display text-[16px] font-semibold text-white">Первооткрыватели эпох</h2>
+          <p class="mt-0.5 text-[12px] text-white/40">Кто первым открыл каждую эпоху</p>
         </div>
 
         <div v-if="loadingLeaderboard" class="space-y-2 p-4">
@@ -375,7 +383,7 @@ watch(() => launcher.selectedSlug, () => {
                 : 'bg-white/6 text-white/50 hover:bg-white/10 hover:text-white/80'"
               @click="activeTier = tier.tier_name"
             >
-              <span class="text-sm leading-none">{{ tier.icon }}</span>
+              <ItemIcon :name="tier.icon" :size="16" />
               <span>{{ tier.tier_label }}</span>
               <span class="ml-0.5 opacity-50">{{ tier.total }}</span>
             </button>
@@ -419,8 +427,7 @@ watch(() => launcher.selectedSlug, () => {
     <template v-else-if="mainTab === 'players'">
       <section class="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.035]">
         <div class="border-b border-white/8 px-4 py-3">
-          <p class="text-[10px] uppercase tracking-[0.22em] text-white/40">Топ игроков</p>
-          <h2 class="mt-0.5 text-base font-semibold">Лучшие сезона</h2>
+          <h2 class="font-display text-[16px] font-semibold text-white">Лучшие игроки сезона</h2>
         </div>
 
         <div v-if="loadingPlayers" class="space-y-2 p-4">
@@ -474,8 +481,7 @@ watch(() => launcher.selectedSlug, () => {
     <template v-else-if="mainTab === 'nations'">
       <section class="overflow-hidden rounded-[20px] border border-white/10 bg-white/[0.035]">
         <div class="border-b border-white/8 px-4 py-3">
-          <p class="text-[10px] uppercase tracking-[0.22em] text-white/40">Рейтинг государств</p>
-          <h2 class="mt-0.5 text-base font-semibold">Силы сезона</h2>
+          <h2 class="font-display text-[16px] font-semibold text-white">Сильнейшие государства</h2>
         </div>
 
         <div v-if="loadingNations" class="space-y-2 p-4">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { useLauncherStore } from '../stores/launcher'
+import { BACKEND_BASE, useLauncherStore } from '../stores/launcher'
+import ItemIcon from '../components/game/ItemIcon.vue'
 
 const launcher = useLauncherStore()
 
@@ -16,11 +17,11 @@ const bpEnabled = computed(() => {
 const bpMaxLevel = computed(() => launcher.bpProfile?.max_level || 120)
 const bpPercent = computed(() =>
   Math.min(100, Math.round(((launcher.bpProfile?.level ?? 0) / bpMaxLevel.value) * 100)))
-// Баланс/экономику показываем только на серверах с экономикой (не на анархии).
-const econEnabled = computed(() => {
-  const f = activeServer.value?.features
-  return !f || f.economy !== false
-})
+// Own head: the uploaded skin's render, else the public endpoint (default skin for players without one).
+const headUrl = computed(() => launcher.skin.hasSkin && launcher.skin.headPreviewUrl
+  ? launcher.skin.headPreviewUrl
+  : `${BACKEND_BASE}/public/player-head/${encodeURIComponent(launcher.accountNickname || 'Steve')}`)
+const emailVerified = computed(() => !/не подтвержд/i.test(launcher.emailVerifiedText || ''))
 
 type Tab = 'profile' | 'skin' | 'security'
 const activeTab = ref<Tab>('profile')
@@ -32,10 +33,6 @@ const localPreviewUrl = ref('')
 const uploadBusy = ref(false)
 const securityBusy = ref(false)
 
-function fmt(value: number | string | null | undefined) {
-  const n = Number(value ?? 0)
-  return new Intl.NumberFormat('ru-RU').format(Number.isFinite(n) ? n : 0)
-}
 function fmtDate(value: string | null | undefined) {
   if (!value) return '—'
   const d = new Date(value)
@@ -95,98 +92,87 @@ const tabs: { key: Tab; label: string }[] = [
     <template v-if="activeTab === 'profile'">
       <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
         <div class="flex items-center gap-4">
-          <!-- Avatar letter -->
-          <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-xl font-bold text-white shadow-lg shadow-violet-500/20">
-            {{ (launcher.accountNickname?.[0] ?? '?').toUpperCase() }}
+          <div class="mc-slot h-[68px] w-[68px] shrink-0 overflow-hidden">
+            <img :src="headUrl" alt="" class="item-icon h-12 w-12 rounded-[6px]" draggable="false" />
           </div>
-          <div class="min-w-0">
-            <p class="truncate text-lg font-bold">{{ launcher.accountNickname }}</p>
-            <p class="text-sm text-white/45">{{ launcher.accountMeta.login }}</p>
-            <p class="text-sm text-white/45">{{ launcher.accountMeta.email }}</p>
-          </div>
-        </div>
-
-        <div class="mt-5 grid gap-3" :class="econEnabled ? 'grid-cols-2' : 'grid-cols-1'">
-          <div v-if="econEnabled" class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
-            <p class="text-2xl font-bold">{{ fmt(launcher.walletBalance) }}</p>
-            <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Баланс</p>
-          </div>
-          <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
-            <p class="text-2xl font-bold">{{ launcher.security.activeRefreshSessions }}</p>
-            <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Активные сессии</p>
+          <div class="min-w-0 flex-1">
+            <p class="font-display truncate text-[24px] font-bold leading-tight text-white">{{ launcher.accountNickname }}</p>
+            <p class="mt-1 truncate text-sm text-white/45">
+              {{ launcher.accountMeta.login }}<template v-if="launcher.accountMeta.email"> · {{ launcher.accountMeta.email }}</template>
+            </p>
           </div>
         </div>
-
-        <p class="mt-4 text-xs text-white/35">{{ launcher.emailVerifiedText }}</p>
+        <div class="mt-4 flex flex-wrap gap-2 text-[12px]">
+          <span
+            class="rounded-full px-3 py-1"
+            :class="emailVerified ? 'bg-emerald-500/12 text-emerald-300' : 'bg-amber-500/12 text-amber-300'"
+          >{{ launcher.emailVerifiedText || (emailVerified ? 'Почта подтверждена' : 'Почта не подтверждена') }}</span>
+          <button
+            type="button"
+            class="rounded-full bg-white/5 px-3 py-1 text-white/60 transition hover:bg-white/10 hover:text-white"
+            @click="activeTab = 'security'"
+          >Активных входов: {{ launcher.security.activeRefreshSessions }}</button>
+        </div>
       </section>
 
       <!-- Battle Pass -->
       <section v-if="bpEnabled" class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
-        <div class="flex items-center justify-between">
-          <p class="text-sm font-semibold">Боевой пропуск</p>
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-display text-[18px] font-semibold text-white">Боевой пропуск</p>
+            <p v-if="launcher.bpProfile" class="mt-0.5 truncate text-[13px] text-white/45">
+              {{ launcher.bpProfile.season_name || `Сезон ${launcher.bpProfile.season ?? ''}` }}
+            </p>
+          </div>
           <span
             v-if="launcher.bpProfile?.has_premium"
-            class="rounded-full border border-amber-400/30 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-300"
-          >✦ Премиум</span>
-          <span v-else-if="launcher.bpProfile" class="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] text-white/35">Бесплатный</span>
+            class="shrink-0 rounded-full bg-amber-400/15 px-3 py-1 text-[12px] font-semibold text-amber-300"
+          >Премиум</span>
+          <span v-else-if="launcher.bpProfile" class="shrink-0 rounded-full bg-white/5 px-3 py-1 text-[12px] text-white/45">Бесплатный</span>
         </div>
 
-        <div v-if="launcher.bpProfile" class="mt-4 space-y-3">
-          <div class="grid grid-cols-2 gap-3">
-            <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
-              <p class="text-2xl font-bold">{{ launcher.bpProfile.level }}</p>
-              <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Уровень из {{ bpMaxLevel }}</p>
-            </div>
-            <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
-              <p class="text-2xl font-bold">{{ launcher.bpProfile.xp.toLocaleString('ru-RU') }}</p>
-              <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Опыт</p>
-            </div>
-          </div>
-
-          <!-- Progress bar -->
-          <div class="rounded-[16px] border border-white/8 bg-white/[0.03] px-4 py-3">
-            <div class="mb-2 flex items-center justify-between text-[11px]">
-              <span class="text-white/40">{{ launcher.bpProfile.season_name || `Сезон ${launcher.bpProfile.season ?? ''}` }}</span>
-              <span class="text-white/30">{{ bpPercent }}%</span>
-            </div>
-            <div class="h-1.5 overflow-hidden rounded-full bg-white/8">
-              <div
-                :style="{
-                  width: bpPercent + '%',
-                  background: launcher.bpProfile.has_premium
-                    ? 'linear-gradient(90deg, #f59e0b, #f97316)'
-                    : 'linear-gradient(90deg, #6366f1, #8b5cf6)',
-                  height: '100%',
-                  borderRadius: '999px',
-                  transition: 'width 0.5s ease',
-                }"
-              ></div>
+        <div v-if="launcher.bpProfile" class="mt-4">
+          <div class="flex items-end gap-4">
+            <div class="mc-slot h-[60px] w-[60px] shrink-0"><ItemIcon name="experience_bottle" :size="40" /></div>
+            <div class="min-w-0 flex-1">
+              <div class="mb-2 flex items-baseline justify-between gap-3">
+                <p>
+                  <span class="font-display text-[30px] font-bold leading-none text-white">{{ launcher.bpProfile.level }}</span>
+                  <span class="ml-1.5 text-sm text-white/45">уровень из {{ bpMaxLevel }}</span>
+                </p>
+                <span class="tabular-nums text-[13px] text-white/40">{{ launcher.bpProfile.xp.toLocaleString('ru-RU') }} опыта</span>
+              </div>
+              <div class="xp-bar" :class="{ 'xp-bar--gold': launcher.bpProfile.has_premium }">
+                <div class="xp-bar__fill" :style="{ width: bpPercent + '%' }"></div>
+              </div>
             </div>
           </div>
-
-          <div
+          <p
             v-if="launcher.bpProfile.has_premium && launcher.bpProfile.premium_expires_at"
-            class="flex items-center justify-between rounded-[16px] border border-amber-400/15 bg-amber-500/8 px-4 py-3 text-xs"
-          >
-            <span class="text-amber-400/70">Премиум активен до</span>
-            <span class="font-semibold text-amber-300">{{ fmtDate(launcher.bpProfile.premium_expires_at) }}</span>
-          </div>
+            class="mt-3 text-[13px] text-amber-300/80"
+          >Премиум активен до {{ fmtDate(launcher.bpProfile.premium_expires_at) }}</p>
         </div>
 
-        <p v-else class="mt-3 text-center text-xs text-white/25">Зайди на сервер чтобы появился прогресс</p>
+        <p v-else class="mt-3 text-[13px] text-white/40">Зайди на сервер — здесь появится твой уровень и опыт.</p>
       </section>
 
-      <!-- Diagnostics -->
-      <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
-        <div class="mb-3 flex items-center justify-between">
-          <p class="text-sm font-semibold text-white/60">Диагностика</p>
+      <!-- Diagnostics: for support, folded away -->
+      <details class="group rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-3">
+          <span>
+            <span class="block text-sm font-semibold text-white/75">Для поддержки</span>
+            <span class="block text-[12px] text-white/40">Технический журнал лаунчера — пригодится, если что-то не работает</span>
+          </span>
+          <span class="text-xs text-white/40 transition group-open:rotate-180">▾</span>
+        </summary>
+        <div class="mt-4 flex justify-end">
           <button
             class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/50 transition hover:bg-white/8 hover:text-white"
             @click="launcher.clearDiagnostics()"
-          >Очистить</button>
+          >Очистить журнал</button>
         </div>
-        <pre class="max-h-[200px] overflow-auto whitespace-pre-wrap break-all rounded-[16px] border border-white/8 bg-[#060912] p-4 text-xs leading-5 text-white/55">{{ diagnosticsText }}</pre>
-      </section>
+        <pre class="mt-2 max-h-[220px] overflow-auto whitespace-pre-wrap break-all rounded-[16px] border border-white/8 bg-black/30 p-4 text-xs leading-5 text-white/55">{{ diagnosticsText }}</pre>
+      </details>
     </template>
 
     <!-- ── SKIN ─────────────────────────────────────────────── -->

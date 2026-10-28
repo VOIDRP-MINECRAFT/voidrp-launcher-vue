@@ -68,8 +68,7 @@ async function submit() {
     <!-- Header -->
     <div class="flex items-end justify-between gap-4">
       <div>
-        <p class="text-[11px] uppercase tracking-[0.25em] text-violet-300/70">Моды</p>
-        <h2 class="mt-1.5 text-2xl font-semibold leading-tight">Предложить мод</h2>
+        <h1 class="font-display text-[26px] font-bold leading-tight text-white">Предложить мод</h1>
         <p class="mt-2 text-sm leading-6 text-white/50">
           Нашли полезный мод? Отправьте ссылку — мы рассмотрим его для добавления на сервер.
         </p>

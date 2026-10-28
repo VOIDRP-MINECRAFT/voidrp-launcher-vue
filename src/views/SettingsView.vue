@@ -77,8 +77,7 @@ const folderActions = [
   <div class="max-w-[720px] space-y-4">
 
     <div>
-      <p class="text-[11px] uppercase tracking-[0.25em] text-violet-300/70">Настройки</p>
-      <h2 class="mt-1.5 text-2xl font-semibold">Параметры лаунчера</h2>
+      <h1 class="font-display text-[26px] font-bold leading-tight text-white">Настройки</h1>
     </div>
 
     <!-- Theme -->
@@ -103,7 +102,7 @@ const folderActions = [
           ></span>
           <span class="min-w-0 flex-1">
             <span class="block truncate text-sm font-medium text-white/85">{{ t.name }}</span>
-            <span class="block text-[10px] text-white/40">{{ launcher.themeId === t.id ? 'Выбрана' : 'Нажмите' }}</span>
+            <span v-if="launcher.themeId === t.id" class="block text-[10px] text-white/40">Выбрана</span>
           </span>
           <svg
             v-if="launcher.themeId === t.id"

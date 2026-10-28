@@ -200,7 +200,7 @@ watch(
         <!-- User info -->
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-1.5">
-            <h1 class="truncate text-[17px] font-bold leading-tight">{{ launcher.accountNickname }}</h1>
+            <h1 class="font-display truncate text-[17px] font-bold leading-tight">{{ launcher.accountNickname }}</h1>
 
             <span
               v-if="launcher.nation.title"
@@ -261,21 +261,19 @@ watch(
     </header>
 
     <!-- ── Progress ────────────────────────────────────────────────── -->
+    <!-- one line: what is happening, how far; the bar runs along the bottom edge -->
     <section
       v-if="launcher.shouldShowProgress"
-      class="panel panel--strong rounded-[20px] px-5 py-3.5"
+      class="panel panel--strong relative overflow-hidden rounded-[16px] px-4 py-2.5"
     >
-      <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0">
-          <p class="text-sm font-medium text-white/90">{{ launcher.progress.title || 'Подготовка' }}</p>
-          <p class="mt-0.5 truncate text-xs text-white/45">{{ launcher.progress.details || launcher.statusText }}</p>
-        </div>
-        <span class="shrink-0 text-xs font-medium tabular-nums text-white/50">{{ Math.round(launcher.progress.percent) }}%</span>
+      <div class="flex items-center gap-3 text-[13px]">
+        <span class="shrink-0 font-semibold text-white/90">{{ launcher.progress.title || 'Подготовка' }}</span>
+        <span class="min-w-0 flex-1 truncate text-white/45">{{ launcher.progress.details || launcher.statusText }}</span>
+        <span class="font-display shrink-0 text-[13px] font-semibold tabular-nums text-white/80">{{ Math.round(launcher.progress.percent) }}%</span>
       </div>
-
-      <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
+      <div class="absolute inset-x-0 bottom-0 h-[3px] bg-white/5">
         <div
-          class="progress-acc h-full rounded-full transition-all duration-300"
+          class="progress-acc h-full transition-all duration-300"
           :style="{ width: `${launcher.progress.percent}%` }"
         ></div>
       </div>

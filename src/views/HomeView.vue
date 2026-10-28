@@ -83,11 +83,6 @@ function selectServer(slug: string) {
           </button>
         </div>
 
-        <!-- Nickname -->
-        <div class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 backdrop-blur-md">
-          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400"></span>
-          <span class="text-[11px] font-medium text-white/70">{{ launcher.playerStats.minecraftNickname || '—' }}</span>
-        </div>
       </div>
 
       <!-- Spacer pushes identity to the bottom -->
@@ -105,7 +100,7 @@ function selectServer(slug: string) {
 
           <div class="min-w-0 flex-1 pb-1">
             <div class="flex flex-wrap items-center gap-2">
-              <h1 class="text-3xl font-black leading-none tracking-tight text-white drop-shadow-lg">
+              <h1 class="font-display text-[34px] font-bold leading-none text-white drop-shadow-lg">
                 {{ activeServer?.name || 'VoidRP' }}
               </h1>
               <span
