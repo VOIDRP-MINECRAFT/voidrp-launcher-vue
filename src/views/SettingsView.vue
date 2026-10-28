@@ -67,9 +67,9 @@ async function confirmMove() {
 onMounted(() => loadLocation())
 
 const folderActions = [
-  { label: 'Логи',   action: () => launcher.openPath(launcher.logsDirectory) },
-  { label: 'Данные', action: () => launcher.openPath(launcher.dataDirectory)  },
-  { label: 'Игра',   action: () => launcher.openPath(launcher.gameDirectory)  },
+  { label: 'Папка логов',    action: () => launcher.openPath(launcher.logsDirectory) },
+  { label: 'Папка лаунчера', action: () => launcher.openPath(launcher.dataDirectory)  },
+  { label: 'Папка игры',     action: () => launcher.openPath(launcher.gameDirectory)  },
 ]
 </script>
 
@@ -184,8 +184,8 @@ const folderActions = [
 
     <!-- Updates -->
     <section class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
-      <p class="text-sm font-semibold">Обновление оболочки</p>
-      <p class="mt-1 text-xs text-white/45">Обновление самого лаунчера, независимо от клиентской сборки.</p>
+      <p class="text-sm font-semibold">Обновление лаунчера</p>
+      <p class="mt-1 text-xs text-white/45">Лаунчер обновляется сам при запуске. Здесь можно проверить обновление вручную.</p>
 
       <div class="mt-4 flex flex-wrap gap-2.5">
         <button
@@ -271,7 +271,7 @@ const folderActions = [
           :key="f.label"
           class="rounded-[12px] border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/60 transition hover:bg-white/8 hover:text-white"
           @click="f.action()"
-        >Открыть {{ f.label }}</button>
+        >{{ f.label }}</button>
       </div>
     </section>
 

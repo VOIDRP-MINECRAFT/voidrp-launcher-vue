@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useLauncherStore } from '../stores/launcher'
+import { nationRoleLabel, useLauncherStore } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 
@@ -29,8 +29,8 @@ const allStats = computed(() => [
   {
     feature: 'nations',
     label: 'Государство',
-    value: hasNation.value ? (launcher.nation.tag ? `[${launcher.nation.tag}]` : launcher.nation.title) : '—',
-    sub: hasNation.value ? launcher.nation.role || 'участник' : 'не состоит',
+    value: hasNation.value ? launcher.nation.title : '—',
+    sub: hasNation.value ? nationRoleLabel(launcher.nation.role).toLowerCase() : 'не состоит',
     accent: 'from-violet-400/40 to-violet-600/0', dot: 'bg-violet-400',
   },
   { feature: 'nations', label: 'Казна', value: fmt(launcher.nationStats.treasuryBalance), sub: 'монет', accent: 'from-indigo-400/40 to-indigo-600/0', dot: 'bg-indigo-400' },

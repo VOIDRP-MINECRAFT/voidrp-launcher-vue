@@ -162,26 +162,6 @@ function selectServer(slug: string) {
           Починить клиент
         </button>
       </div>
-
-      <!-- Game files coming in (in the background after start-up, or while Play prepares) -->
-      <div
-        v-if="launcher.shouldShowProgress"
-        class="mt-4 max-w-xl rounded-[18px] border border-white/10 bg-black/30 p-4 backdrop-blur-md"
-      >
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-sm font-semibold text-white/90">{{ launcher.progress.title || 'Подготовка' }}</p>
-            <p class="mt-0.5 truncate text-xs text-white/45">{{ launcher.progress.details || launcher.statusText }}</p>
-          </div>
-          <span class="shrink-0 text-xs tabular-nums text-white/45">{{ Math.round(launcher.progress.percent) }}%</span>
-        </div>
-        <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
-          <div
-            class="progress-acc h-full rounded-full transition-all duration-300"
-            :style="{ width: `${launcher.progress.percent}%` }"
-          ></div>
-        </div>
-      </div>
     </div>
   </div>
 </template>

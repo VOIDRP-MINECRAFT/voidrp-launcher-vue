@@ -23,7 +23,7 @@ function openInBrowser() {
 </script>
 
 <template>
-  <div class="flex h-full flex-col gap-3" style="height: calc(100vh - 220px); min-height: 420px;">
+  <div class="flex h-full flex-col gap-3" style="min-height: 420px;">
 
     <div class="flex items-center justify-between">
       <p class="text-sm font-semibold text-white/80">Онлайн карта</p>

@@ -12,6 +12,10 @@ const bpEnabled = computed(() => {
   const f = activeServer.value?.features
   return !f || f.battlepass !== false
 })
+// The season length comes with the profile (the current one has 500 levels); 120 was the old fixed value.
+const bpMaxLevel = computed(() => launcher.bpProfile?.max_level || 120)
+const bpPercent = computed(() =>
+  Math.min(100, Math.round(((launcher.bpProfile?.level ?? 0) / bpMaxLevel.value) * 100)))
 // Баланс/экономику показываем только на серверах с экономикой (не на анархии).
 const econEnabled = computed(() => {
   const f = activeServer.value?.features
@@ -119,11 +123,11 @@ const tabs: { key: Tab; label: string }[] = [
       <!-- Battle Pass -->
       <section v-if="bpEnabled" class="rounded-[22px] border border-white/10 bg-white/[0.035] p-5">
         <div class="flex items-center justify-between">
-          <p class="text-sm font-semibold">Battle Pass</p>
+          <p class="text-sm font-semibold">Боевой пропуск</p>
           <span
             v-if="launcher.bpProfile?.has_premium"
             class="rounded-full border border-amber-400/30 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold text-amber-300"
-          >✦ Premium</span>
+          >✦ Премиум</span>
           <span v-else-if="launcher.bpProfile" class="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] text-white/35">Бесплатный</span>
         </div>
 
@@ -131,7 +135,7 @@ const tabs: { key: Tab; label: string }[] = [
           <div class="grid grid-cols-2 gap-3">
             <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
               <p class="text-2xl font-bold">{{ launcher.bpProfile.level }}</p>
-              <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Уровень / 120</p>
+              <p class="mt-1 text-[10px] uppercase tracking-[0.18em] text-white/35">Уровень из {{ bpMaxLevel }}</p>
             </div>
             <div class="rounded-[16px] border border-white/8 bg-white/[0.03] p-4 text-center">
               <p class="text-2xl font-bold">{{ launcher.bpProfile.xp.toLocaleString('ru-RU') }}</p>
@@ -142,13 +146,13 @@ const tabs: { key: Tab; label: string }[] = [
           <!-- Progress bar -->
           <div class="rounded-[16px] border border-white/8 bg-white/[0.03] px-4 py-3">
             <div class="mb-2 flex items-center justify-between text-[11px]">
-              <span class="text-white/40">Сезон {{ launcher.bpProfile.season }}</span>
-              <span class="text-white/30">{{ Math.round((launcher.bpProfile.level / 120) * 100) }}%</span>
+              <span class="text-white/40">{{ launcher.bpProfile.season_name || `Сезон ${launcher.bpProfile.season ?? ''}` }}</span>
+              <span class="text-white/30">{{ bpPercent }}%</span>
             </div>
             <div class="h-1.5 overflow-hidden rounded-full bg-white/8">
               <div
                 :style="{
-                  width: Math.min(100, Math.round((launcher.bpProfile.level / 120) * 100)) + '%',
+                  width: bpPercent + '%',
                   background: launcher.bpProfile.has_premium
                     ? 'linear-gradient(90deg, #f59e0b, #f97316)'
                     : 'linear-gradient(90deg, #6366f1, #8b5cf6)',
@@ -164,7 +168,7 @@ const tabs: { key: Tab; label: string }[] = [
             v-if="launcher.bpProfile.has_premium && launcher.bpProfile.premium_expires_at"
             class="flex items-center justify-between rounded-[16px] border border-amber-400/15 bg-amber-500/8 px-4 py-3 text-xs"
           >
-            <span class="text-amber-400/70">Premium активен до</span>
+            <span class="text-amber-400/70">Премиум активен до</span>
             <span class="font-semibold text-amber-300">{{ fmtDate(launcher.bpProfile.premium_expires_at) }}</span>
           </div>
         </div>

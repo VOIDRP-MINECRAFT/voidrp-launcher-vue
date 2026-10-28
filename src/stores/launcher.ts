@@ -87,6 +87,8 @@ interface BattlePassProfile {
   xp: number
   has_premium: boolean
   premium_expires_at: string | null
+  max_level?: number
+  season_name?: string | null
 }
 
 export interface CrashAction {
@@ -127,6 +129,14 @@ export interface GameLocationInfo {
   gameDirectory: string
   sizeBytes: number | null
   freeBytes: number | null
+}
+
+// nation_members.role comes raw from the backend; same words as on the site.
+const NATION_ROLE_LABELS: Record<string, string> = { leader: 'Лидер', officer: 'Офицер', member: 'Участник' }
+
+export function nationRoleLabel(role: string | null | undefined): string {
+  if (!role) return 'Участник'
+  return NATION_ROLE_LABELS[role.toLowerCase()] ?? role
 }
 
 export const SERVER_SIDE_CRASH_ACTIONS = new Set(['fix_files', 'reset_config', 'reset_all_configs', 'repair'])

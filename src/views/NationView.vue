@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useLauncherStore } from '../stores/launcher'
+import { nationRoleLabel, useLauncherStore } from '../stores/launcher'
 
 const launcher = useLauncherStore()
 
@@ -29,7 +29,8 @@ function fmtDate(value: string | null | undefined) {
       <!-- ── Nation banner ──────────────────────────────────────── -->
       <section class="relative overflow-hidden rounded-[22px] border border-white/10">
         <div
-          class="relative min-h-[180px] p-5"
+          class="relative p-5"
+          :class="nationImage ? 'min-h-[180px]' : ''"
           :style="nationImage
             ? { backgroundImage: `linear-gradient(160deg, rgba(4,6,15,.25) 0%, rgba(4,6,15,.82) 60%), url(${nationImage})`, backgroundSize: 'cover', backgroundPosition: 'center' }
             : {}"
@@ -53,7 +54,7 @@ function fmtDate(value: string | null | undefined) {
                   <span v-if="launcher.nation.tag" class="rounded-full border border-white/15 bg-white/8 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                     [{{ launcher.nation.tag }}]
                   </span>
-                  <span class="text-[11px] text-white/55">{{ launcher.nation.role || 'Участник' }}</span>
+                  <span class="text-[11px] text-white/55">{{ nationRoleLabel(launcher.nation.role) }}</span>
                   <span v-if="launcher.nation.allianceTitle" class="text-[11px] text-violet-300/70">
                     · Альянс: {{ launcher.nation.allianceTitle }}{{ launcher.nation.allianceTag ? ` [${launcher.nation.allianceTag}]` : '' }}
                   </span>
@@ -75,7 +76,7 @@ function fmtDate(value: string | null | undefined) {
           v-for="stat in [
             { label: 'Территория', value: fmt(launcher.nationStats.territoryPoints), dot: 'bg-sky-400', accent: 'from-sky-400/35 to-sky-600/0' },
             { label: 'Престиж',    value: fmt(launcher.nationStats.prestigeScore),    dot: 'bg-amber-400', accent: 'from-amber-400/35 to-amber-600/0' },
-            { label: 'Онлайн',     value: fmtH(launcher.nationStats.totalPlaytimeMinutes), dot: 'bg-emerald-400', accent: 'from-emerald-400/35 to-emerald-600/0' },
+            { label: 'Наиграно',   value: fmtH(launcher.nationStats.totalPlaytimeMinutes), dot: 'bg-emerald-400', accent: 'from-emerald-400/35 to-emerald-600/0' },
             { label: 'События',    value: fmt(launcher.nationStats.eventsCompleted),  dot: 'bg-violet-400', accent: 'from-violet-400/35 to-violet-600/0' },
           ]"
           :key="stat.label"
@@ -109,7 +110,7 @@ function fmtDate(value: string | null | undefined) {
           <div class="mt-4 grid grid-cols-4 gap-2">
             <div
               v-for="s in [
-                { label: 'Онлайн',  value: fmtH(launcher.playerStats.totalPlaytimeMinutes) },
+                { label: 'В игре',  value: fmtH(launcher.playerStats.totalPlaytimeMinutes) },
                 { label: 'PvP',     value: fmt(launcher.playerStats.pvpKills) },
                 { label: 'Мобы',    value: fmt(launcher.playerStats.mobKills) },
                 { label: 'Смерти',  value: fmt(launcher.playerStats.deaths) },
@@ -139,8 +140,8 @@ function fmtDate(value: string | null | undefined) {
               <p class="mt-1 text-[10px] uppercase tracking-[0.14em] text-white/35">Квесты</p>
             </div>
             <div class="rounded-[14px] border border-white/8 bg-white/[0.03] p-3">
-              <p class="text-sm font-bold">{{ fmt(launcher.playerStats.pvpKills) }}</p>
-              <p class="mt-1 text-[10px] uppercase tracking-[0.14em] text-white/35">Убийств игроков</p>
+              <p class="text-sm font-bold">{{ fmtDate(launcher.playerStats.lastSeenAt) }}</p>
+              <p class="mt-1 text-[10px] uppercase tracking-[0.14em] text-white/35">Последний раз в игре</p>
             </div>
           </div>
         </div>

@@ -163,7 +163,7 @@ async function fetchTier(nick: string) {
 // dashboard object every 1.2 s, and a tuple source would be a new array each
 // time — re-firing this watcher, blanking the badge and refetching (flicker).
 watch(
-  () => `${launcher.playerStats.minecraftNickname ?? ''} ${launcher.selectedSlug ?? ''}`,
+  () => `${launcher.playerStats.minecraftNickname ?? ''}|${launcher.selectedSlug ?? ''}`,
   () => {
     const nick = launcher.playerStats.minecraftNickname
     currentTierLabel.value = null
@@ -321,7 +321,7 @@ watch(
         <!-- Version footer -->
         <div class="mt-3 rounded-[14px] border border-white/8 bg-white/[0.03] px-3 py-2.5">
           <p class="text-[10px] font-medium text-white/30">VoidRP · v{{ launcher.launcherVersionText }}</p>
-          <p class="mt-0.5 truncate text-[11px] leading-4 text-white/40">{{ launcher.statusText }}</p>
+          <p class="mt-0.5 line-clamp-2 text-[11px] leading-4 text-white/40" :title="launcher.statusText">{{ launcher.statusText }}</p>
         </div>
       </aside>
 
