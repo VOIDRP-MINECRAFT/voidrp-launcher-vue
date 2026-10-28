@@ -8,13 +8,23 @@ function subscribe(channel, callback) {
   }
 }
 
+// The main process starts the core on 38765 unless that port is taken, and passes the
+// address it really used (BrowserWindow additionalArguments).
+const coreUrlArg = process.argv.find((arg) => arg.startsWith('--voidrp-core-url='))
+
 contextBridge.exposeInMainWorld('desktop', {
+  coreBaseUrl: coreUrlArg ? coreUrlArg.slice('--voidrp-core-url='.length) : '',
+
   request(method, path, body) {
     return ipcRenderer.invoke('desktop:request', { method, path, body })
   },
 
   getCoreStatus() {
     return ipcRenderer.invoke('desktop:get-core-status')
+  },
+
+  getBootInfo() {
+    return ipcRenderer.invoke('desktop:get-boot-info')
   },
 
   onUpdaterStatus(callback) {

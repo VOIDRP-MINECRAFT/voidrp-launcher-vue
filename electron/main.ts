@@ -3,9 +3,10 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 // Required for WebGL to work correctly in webview on all GPUs
 app.commandLine.appendSwitch('ignore-gpu-blacklist')
 app.commandLine.appendSwitch('enable-gpu-rasterization')
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,8 +15,29 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const CORE_HOST = '127.0.0.1'
-const CORE_PORT = 38765
-const CORE_BASE_URL = `http://${CORE_HOST}:${CORE_PORT}`
+const CORE_PREFERRED_PORT = 38765
+// 38765 unless it is taken (another program, or reserved by Windows for Hyper-V/WSL); then
+// prepareCorePort() picks a free one and the renderer gets it through the preload.
+let corePort = CORE_PREFERRED_PORT
+const coreBaseUrl = () => `http://${CORE_HOST}:${corePort}`
+// How long the start-up update check may hold the window back.
+const UPDATE_MANIFEST_TIMEOUT_MS = 8000
+// A self-update download that stops receiving data for this long fails instead of hanging.
+const UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS = 30000
+
+// A second copy would start a second core and both would fight over the port. Players double-click
+// again while the portable exe is still unpacking; bring the open window forward instead.
+const isPrimaryInstance = app.requestSingleInstanceLock()
+if (!isPrimaryInstance) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
+}
 const DEFAULT_SELF_UPDATE_MANIFEST_URL = 'https://void-rp.ru/launcher/self-update/manifest.json'
 
 type DesktopRequestPayload = {
@@ -71,6 +93,8 @@ type PendingShellUpdate = {
 let mainWindow: BrowserWindow | null = null
 let coreProcess: ChildProcessWithoutNullStreams | null = null
 let coreStartPromise: Promise<void> | null = null
+// Port choice + first spawn, started at launch; everything that talks to the core waits for it.
+let coreBootPromise: Promise<void> | null = null
 let lastCoreError = ''
 let lastCoreExitCode: number | null = null
 // Last lines the core printed: shown on the splash when it fails, so a player can paste the real reason.
@@ -94,8 +118,57 @@ let shellUpdaterStatus: UpdaterStatusPayload = {
 let pendingShellUpdate: PendingShellUpdate | null = null
 let shellUpdateInProgress = false
 
+// Packaged on Windows, console output goes nowhere: without this file a launcher that fails to
+// start leaves no trace. The boot report sends its tail (see describeBootError in the renderer).
+let mainLogPath: string | null = null
+function resolveMainLogPath(): string {
+  if (mainLogPath !== null) return mainLogPath
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs')
+    fs.mkdirSync(dir, { recursive: true })
+    mainLogPath = path.join(dir, 'main.log')
+    const stat = fs.statSync(mainLogPath, { throwIfNoEntry: false })
+    if (stat && stat.size > 1_000_000) fs.renameSync(mainLogPath, path.join(dir, 'main.old.log'))
+  } catch {
+    mainLogPath = ''
+  }
+  return mainLogPath
+}
+
 function logMain(message: string) {
   console.log(`[VoidRP Main] ${message}`)
+  const logPath = resolveMainLogPath()
+  if (!logPath) return
+  try {
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`)
+  } catch {
+    // a log we cannot write must not stop the launcher
+  }
+}
+
+function readMainLogTail(maxLines = 80): string {
+  const logPath = resolveMainLogPath()
+  if (!logPath) return ''
+  try {
+    const stat = fs.statSync(logPath)
+    const length = Math.min(stat.size, 32 * 1024)
+    const buffer = Buffer.alloc(length)
+    const fd = fs.openSync(logPath, 'r')
+    try {
+      fs.readSync(fd, buffer, 0, length, stat.size - length)
+    } finally {
+      fs.closeSync(fd)
+    }
+    return buffer.toString('utf-8').split(/\r?\n/).filter(Boolean).slice(-maxLines).join('\n')
+  } catch {
+    return ''
+  }
+}
+
+function describeSystem(): string {
+  // os.version() names the edition ("Windows 11 Pro"), os.release() the build ("10.0.26200").
+  const name = typeof os.version === 'function' ? os.version() : os.type()
+  return `${name} ${os.release()} ${process.arch}`
 }
 
 function emitCoreStatus() {
@@ -117,7 +190,7 @@ function getCoreStatus(): CoreStatusPayload {
   return {
     running: !!coreProcess && coreProcess.exitCode === null,
     pid: coreProcess?.pid ?? null,
-    baseUrl: CORE_BASE_URL,
+    baseUrl: coreBaseUrl(),
     executablePath: resolveCoreExecutablePath(),
     lastError: lastCoreError,
     exitCode: lastCoreExitCode,
@@ -269,18 +342,54 @@ function computeSha256(filePath: string): string {
 }
 
 async function downloadToFile(url: string, targetPath: string) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`Download failed (${response.status}) for ${url}`)
+  // Abort when no data arrives for a while: a stalled connection used to leave the update
+  // window at the same percent forever, and the launcher never opened.
+  const controller = new AbortController()
+  let idleTimer = setTimeout(() => controller.abort(), UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS)
+  const touch = () => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(), UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS)
   }
 
-  const buffer = Buffer.from(await response.arrayBuffer())
-  await fs.promises.writeFile(targetPath, buffer)
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok || !response.body) {
+      throw new Error(`Download failed (${response.status}) for ${url}`)
+    }
+
+    const chunks: Buffer[] = []
+    const reader = response.body.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      touch()
+      chunks.push(Buffer.from(value))
+    }
+    await fs.promises.writeFile(targetPath, Buffer.concat(chunks))
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Скачивание обновления остановилось: ${UPDATE_DOWNLOAD_IDLE_TIMEOUT_MS / 1000} с без данных (${url}).`)
+    }
+    throw error
+  } finally {
+    clearTimeout(idleTimer)
+  }
 }
 
 async function fetchUpdateManifest(manifestUrl: string): Promise<LauncherUpdateManifest> {
   const separator = manifestUrl.includes('?') ? '&' : '?'
-  const response = await fetch(`${manifestUrl}${separator}t=${Date.now()}`)
+  let response: Response
+  try {
+    // The window waits for this check; a slow or blocked server must not keep it hidden.
+    response = await fetch(`${manifestUrl}${separator}t=${Date.now()}`, {
+      signal: AbortSignal.timeout(UPDATE_MANIFEST_TIMEOUT_MS)
+    })
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+      throw new Error(`Сервер обновлений не ответил за ${UPDATE_MANIFEST_TIMEOUT_MS / 1000} с.`)
+    }
+    throw error
+  }
   if (!response.ok) {
     throw new Error(`Self-update manifest request failed with status ${response.status}.`)
   }
@@ -364,6 +473,10 @@ async function installShellUpdate(update: PendingShellUpdate) {
       message: 'Подготавливаем установку обновления...'
     })
 
+    // app.exit() below skips before-quit, so the core would outlive the launcher, keep the port
+    // and leave the updated launcher talking to the old core.
+    await stopCoreProcess()
+
     const args = [
       '--pid', String(process.pid),
       '--source', launcherDownloadPath,
@@ -441,6 +554,11 @@ async function runStartupAutoUpdate(): Promise<boolean> {
     return true
   } catch (error) {
     logMain(`Startup update check failed: ${error instanceof Error ? error.message : String(error)}`)
+    // The update window may already be open; the main window takes its place, not a second one.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.destroy()
+      mainWindow = null
+    }
     emitUpdaterStatus({
       available: false,
       downloading: false,
@@ -468,6 +586,8 @@ function createWindow(updateMode = false) {
     ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: resolvePreloadPath(),
+      // The core's address (the port may not be 38765), read by the preload.
+      additionalArguments: [`--voidrp-core-url=${coreBaseUrl()}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -515,7 +635,9 @@ function startCoreProcess() {
     cwd: path.dirname(executablePath),
     env: {
       ...process.env,
-      ASPNETCORE_URLS: CORE_BASE_URL,
+      ASPNETCORE_URLS: coreBaseUrl(),
+      // The core watches this pid and stops when the launcher is gone (crash, Task Manager).
+      VOIDRP_PARENT_PID: String(process.pid),
       DOTNET_ENVIRONMENT: 'Production',
       ASPNETCORE_ENVIRONMENT: 'Production',
       VOIDRP_LAUNCHER_VERSION: app.getVersion()
@@ -567,13 +689,95 @@ function startCoreProcess() {
   emitCoreStatus()
 }
 
-async function pingCore(): Promise<boolean> {
+async function readCoreHealth(port: number): Promise<{ pid?: number } | null> {
   try {
-    const response = await fetch(`${CORE_BASE_URL}/health`, { method: 'GET' })
-    return response.ok
+    const response = await fetch(`http://${CORE_HOST}:${port}/health`, { method: 'GET', signal: AbortSignal.timeout(1500) })
+    if (!response.ok) return null
+    return (await response.json().catch(() => ({}))) as { pid?: number }
   } catch {
-    return false
+    return null
   }
+}
+
+async function pingCore(): Promise<boolean> {
+  const health = await readCoreHealth(corePort)
+  if (!health) return false
+  // Cores since 4.0.56 say their pid: only our own child counts, not a stale one on the port.
+  if (typeof health.pid === 'number' && health.pid !== coreProcess?.pid) return false
+  return true
+}
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => server.close(() => resolve(true)))
+    server.listen(port, CORE_HOST)
+  })
+}
+
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.once('error', reject)
+    server.listen(0, CORE_HOST, () => {
+      const address = server.address()
+      server.close(() => (address && typeof address === 'object' ? resolve(address.port) : reject(new Error('No free port'))))
+    })
+  })
+}
+
+function killStaleCore(pid: number | undefined) {
+  try {
+    if (typeof pid === 'number') {
+      process.kill(pid)
+    } else if (process.platform === 'win32') {
+      // Cores before 4.0.56 do not report their pid. The single-instance lock means no other
+      // launcher of ours is open, so any core still running is a leftover.
+      spawnSync('taskkill', ['/F', '/IM', resolveCoreExeName()], { windowsHide: true, timeout: 5000 })
+    } else {
+      spawnSync('pkill', ['-f', resolveCoreExeName()], { timeout: 5000 })
+    }
+  } catch (error) {
+    logMain(`Could not stop the stale core: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+async function prepareCorePort(): Promise<void> {
+  if (await isPortFree(CORE_PREFERRED_PORT)) {
+    corePort = CORE_PREFERRED_PORT
+    return
+  }
+
+  // Something holds our port. A core answering there was left by an earlier run (an update
+  // exit, a crash): the new core could not bind and the window would talk to the old one.
+  const stale = await readCoreHealth(CORE_PREFERRED_PORT)
+  if (stale) {
+    logMain(`Port ${CORE_PREFERRED_PORT} is held by a stale core (pid ${stale.pid ?? 'unknown'}); stopping it.`)
+    killStaleCore(stale.pid)
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (await isPortFree(CORE_PREFERRED_PORT)) {
+        corePort = CORE_PREFERRED_PORT
+        return
+      }
+      await new Promise((r) => setTimeout(r, 150))
+    }
+  }
+
+  corePort = await findFreePort()
+  logMain(`Port ${CORE_PREFERRED_PORT} is busy (${stale ? 'the stale core did not stop' : 'another program, or reserved by Windows'}); the core uses ${corePort}.`)
+}
+
+async function stopCoreProcess(timeoutMs = 3000): Promise<void> {
+  const child = coreProcess
+  if (!child || child.exitCode !== null) return
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+  try {
+    child.kill()
+  } catch {
+    return
+  }
+  await Promise.race([exited, new Promise((r) => setTimeout(r, timeoutMs))])
 }
 
 async function waitForCoreReady(timeoutMs = 90000): Promise<void> {
@@ -603,6 +807,10 @@ async function ensureCoreRunning(): Promise<void> {
     throw new Error('Идёт обновление оболочки. Дождитесь завершения.')
   }
 
+  if (coreBootPromise) {
+    await coreBootPromise
+  }
+
   if (await pingCore()) {
     return
   }
@@ -630,7 +838,7 @@ async function proxyCoreRequest<T = unknown>(payload: DesktopRequestPayload): Pr
   const method = (payload.method || 'GET').toUpperCase()
   const normalizedPath = payload.path.startsWith('/') ? payload.path : `/${payload.path}`
 
-  const response = await fetch(`${CORE_BASE_URL}${normalizedPath}`, {
+  const response = await fetch(`${coreBaseUrl()}${normalizedPath}`, {
     method,
     headers: {
       'Content-Type': 'application/json'
@@ -673,6 +881,13 @@ function registerIpcHandlers() {
 
     return getCoreStatus()
   })
+
+  // For the boot report a player's launcher sends when it cannot start.
+  ipcMain.handle('desktop:get-boot-info', async () => ({
+    version: app.getVersion(),
+    os: describeSystem(),
+    mainLogTail: readMainLogTail()
+  }))
 
   ipcMain.handle('desktop:open-external', async (_event, url?: string) => {
     if (!url) return false
@@ -787,6 +1002,8 @@ function registerIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+  if (!isPrimaryInstance) return
+  logMain(`Launcher ${app.getVersion()} starting on ${describeSystem()}.`)
   registerIpcHandlers()
 
   // Allow all permission requests from webviews (needed for WebGL/GPU in map view)
@@ -794,18 +1011,24 @@ app.whenReady().then(async () => {
     callback(true)
   })
 
-  // Boot CoreHost immediately so it warms up while the update manifest is being fetched
-  try {
-    startCoreProcess()
-  } catch {
-    // Will retry inside ensureCoreRunning if the exe is missing or fails
-  }
+  // Boot CoreHost immediately so it warms up while the update manifest is being fetched.
+  // The port is settled first: the window gets the core's address when it is created.
+  coreBootPromise = (async () => {
+    try {
+      await prepareCorePort()
+      startCoreProcess()
+    } catch (error) {
+      // Will retry inside ensureCoreRunning if the exe is missing or fails
+      logMain(`Core start failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })()
 
   const autoUpdateStarted = await runStartupAutoUpdate()
   if (autoUpdateStarted) {
     return
   }
 
+  await coreBootPromise
   createWindow()
 
   try {

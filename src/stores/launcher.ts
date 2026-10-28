@@ -226,7 +226,8 @@ interface ToastItem {
   message: string
 }
 
-export const API_BASE = 'http://127.0.0.1:38765'
+// The core listens on 38765 unless that port was taken; the preload passes the real address.
+export const API_BASE: string = (window as any)?.desktop?.coreBaseUrl || 'http://127.0.0.1:38765'
 export const BACKEND_BASE = 'https://api.void-rp.ru/api/v1'
 export const SITE_BASE = 'https://void-rp.ru'
 
@@ -325,6 +326,38 @@ async function describeBootError(error: unknown): Promise<BootError> {
     core.logTail?.length ? `\nЛог ядра:\n${core.logTail.join('\n')}` : '',
   ].filter(Boolean).join('\n')
   return { message, hint, report }
+}
+
+// A launcher that cannot start has no session to send a crash report with, and until now such
+// failures only reached us when a player copied the report by hand. Sent once per distinct error.
+const sentBootReports = new Set<string>()
+
+// Windows/Linux account names are personal data and of no use for the diagnosis.
+function maskUserPaths(text: string): string {
+  return text.replace(/([\\/](?:Users|home)[\\/])[^\\/\r\n]+/gi, '$1***')
+}
+
+async function sendBootReport(boot: BootError): Promise<void> {
+  if (sentBootReports.has(boot.message)) return
+  sentBootReports.add(boot.message)
+  try {
+    const desktop = (window as any)?.desktop
+    const info = (desktop?.getBootInfo ? await desktop.getBootInfo() : {}) as { version?: string; os?: string; mainLogTail?: string }
+    await fetch(`${BACKEND_BASE}/launcher/boot-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        launcher_version: info.version?.slice(0, 32) ?? null,
+        os_name: (info.os || navigator.userAgent).slice(0, 160),
+        error: maskUserPaths(boot.message).slice(0, 4000) || 'unknown',
+        hint: boot.hint.slice(0, 2000),
+        report: maskUserPaths(boot.report).slice(0, 20000),
+        main_log_tail: info.mainLogTail ? maskUserPaths(info.mainLogTail).slice(-20000) : null,
+      }),
+    })
+  } catch {
+    // offline or the site is down: the copy button on the splash still works
+  }
 }
 
 // The core is spawned by the main process at the same time the window opens. On a cold start
@@ -627,6 +660,7 @@ export const useLauncherStore = defineStore('launcher', () => {
         stopBootstrapPoll()
         initProgress.value = 0
         bootError.value = await describeBootError(error)
+        void sendBootReport(bootError.value)
       }
     })()
     try {

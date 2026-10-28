@@ -90,7 +90,29 @@ app.UseCors();
     catalog.AccessTokenProvider = () => authSession.Snapshot?.AccessToken;
 }
 
-app.MapGet("/health", () => Results.Ok(new { ok = true }));
+// The launcher passes its own pid. When it goes away without stopping the core — a crash, Task
+// Manager, or the self-update exit — the core stops too instead of holding the port until a reboot
+// (the next launcher could not start its own core and talked to this stale one).
+if (int.TryParse(Environment.GetEnvironmentVariable("VOIDRP_PARENT_PID"), out var parentPid) && parentPid > 0)
+{
+    var lifetime = app.Lifetime;
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var parent = System.Diagnostics.Process.GetProcessById(parentPid);
+            await parent.WaitForExitAsync();
+        }
+        catch
+        {
+            // already gone, or not ours to watch — either way nobody is left to talk to
+        }
+        lifetime.StopApplication();
+    });
+}
+
+// pid: lets the launcher tell its own core from a stale one left on the port by an older run.
+app.MapGet("/health", () => Results.Ok(new { ok = true, pid = Environment.ProcessId }));
 
 app.MapGet("/api/bootstrap", async (LauncherFacadeService facade) =>
     Results.Ok(await facade.InitializeAsync(CancellationToken.None)));
