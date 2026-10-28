@@ -60,6 +60,10 @@ async function loadProgression() {
   }
 }
 onMounted(loadProgression)
+
+// The bars fill once when the page opens: the one moment of motion on this screen.
+const filled = ref(false)
+onMounted(() => requestAnimationFrame(() => { filled.value = true }))
 watch(() => [nickname.value, launcher.selectedSlug], loadProgression)
 
 const tierIndex = computed(() => allTiers.value.findIndex((t) => t.tier_name === currentTier.value))
@@ -143,7 +147,7 @@ const slots = computed(() => [
               <span class="font-semibold text-white/85">{{ tierLabel || 'Эпохи ещё впереди' }}</span>
               <span class="tabular-nums text-white/40">{{ Math.max(tierIndex + 1, 0) }} из {{ allTiers.length }} эпох</span>
             </div>
-            <div class="xp-bar"><div class="xp-bar__fill" :style="{ width: `${tierPercent}%` }"></div></div>
+            <div class="xp-bar"><div class="xp-bar__fill" :style="{ width: `${filled ? tierPercent : 0}%` }"></div></div>
             <p v-if="nextTier" class="mt-2 text-[12px] text-white/40">Следующая: {{ nextTier }}</p>
           </div>
 
@@ -214,7 +218,7 @@ const slots = computed(() => [
               <span><span class="font-display text-[15px] font-semibold text-white">{{ bp.level }}</span> <span class="text-white/40">уровень из {{ bpMax }}</span></span>
               <span class="tabular-nums text-white/40">{{ bpPercent }}%</span>
             </div>
-            <div class="xp-bar" :class="{ 'xp-bar--gold': bp.has_premium }"><div class="xp-bar__fill" :style="{ width: `${bpPercent}%` }"></div></div>
+            <div class="xp-bar" :class="{ 'xp-bar--gold': bp.has_premium }"><div class="xp-bar__fill" :style="{ width: `${filled ? bpPercent : 0}%` }"></div></div>
           </div>
         </div>
       </RouterLink>

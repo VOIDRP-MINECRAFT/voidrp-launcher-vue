@@ -503,7 +503,7 @@ body {
   height: 100%;
   background: linear-gradient(180deg, #a8f56f 0%, var(--mc-xp) 45%, var(--mc-xp-deep) 100%);
   box-shadow: 0 0 12px rgba(126, 224, 74, 0.45);
-  transition: width 0.6s cubic-bezier(.2, .8, .2, 1);
+  transition: width 0.9s cubic-bezier(.2, .8, .2, 1);
 }
 /* notches every 1/18 of the bar, as in the game */
 .xp-bar::after {
